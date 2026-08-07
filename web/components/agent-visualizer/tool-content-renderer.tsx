@@ -75,7 +75,7 @@ function EditContent({ data, compact }: { data: Record<string, unknown>; compact
   return (
     <div>
       <FilePath path={filePath} />
-      <div className="rounded overflow-hidden text-[9px] font-mono leading-snug" style={{ background: COLORS.codeBlockBg }}>
+      <div className="rounded overflow-hidden text-[9px] font-mono font-code leading-snug" style={{ background: COLORS.codeBlockBg }}>
         {oldLines.map((line, i) => (
           <div key={`old-${i}`} className="px-1.5 py-px" style={{ color: COLORS.diffRemoved, background: COLORS.diffRemovedBg }}>
             <span className="opacity-50 mr-1">-</span>{line || ' '}
@@ -146,7 +146,7 @@ function BashContent({ data, compact }: { data: Record<string, unknown>; compact
       {description && (
         <div className="text-[9px] mb-1 opacity-60" style={{ color: COLORS.assistantText }}>{description}</div>
       )}
-      <div className="rounded px-1.5 py-1 text-[9px] font-mono" style={{ background: COLORS.codeBlockBg, color: COLORS.tool_calling }}>
+      <div className="rounded px-1.5 py-1 text-[9px] font-mono font-code" style={{ background: COLORS.codeBlockBg, color: COLORS.tool_calling }}>
         <span className="opacity-55 mr-1">$</span>
         {command.length > maxLen ? command.slice(0, maxLen) + '...' : command}
       </div>
@@ -163,7 +163,7 @@ function WriteContent({ data, compact }: { data: Record<string, unknown>; compac
   return (
     <div>
       <FilePath path={filePath} />
-      <div className="rounded px-1.5 py-1 text-[9px] font-mono leading-snug" style={{ background: COLORS.codeBlockBg, color: COLORS.contentDim }}>
+      <div className="rounded px-1.5 py-1 text-[9px] font-mono font-code leading-snug" style={{ background: COLORS.codeBlockBg, color: COLORS.contentDim }}>
         {lines.map((line, i) => (
           <div key={i} className="truncate">{line || ' '}</div>
         ))}
@@ -222,7 +222,7 @@ function WebSearchContent({ data }: { data: Record<string, unknown> }) {
   const query = String(data.query || '')
 
   return (
-    <div className="rounded px-1.5 py-1 text-[10px] font-mono flex items-center gap-1.5" style={{ background: COLORS.codeBlockBg }}>
+    <div className="rounded px-1.5 py-1 text-[10px] font-mono font-code flex items-center gap-1.5" style={{ background: COLORS.codeBlockBg }}>
       <span style={{ color: COLORS.searchIcon }}>🔍</span>
       <span style={{ color: COLORS.assistantText }}>{query}</span>
     </div>
@@ -237,7 +237,7 @@ function WebFetchContent({ data }: { data: Record<string, unknown> }) {
 
   return (
     <div>
-      <div className="rounded px-1.5 py-1 text-[9px] font-mono truncate" style={{ background: COLORS.codeBlockBg, color: COLORS.filePathActive }}>
+      <div className="rounded px-1.5 py-1 text-[9px] font-mono font-code truncate" style={{ background: COLORS.codeBlockBg, color: COLORS.filePathActive }}>
         🌐 {displayUrl}
       </div>
       {prompt && (

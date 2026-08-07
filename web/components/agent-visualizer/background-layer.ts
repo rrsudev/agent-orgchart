@@ -2,7 +2,9 @@ import { DepthParticle } from '@/lib/agent-types'
 import { COLORS } from '@/lib/colors'
 import { alphaHex } from '@/lib/utils'
 
-const NUM_PARTICLES = 80
+// Minimalist light theme: far fewer, fainter parallax particles (depth should
+// read through layering, not busy motion).
+const NUM_PARTICLES = 22
 const HEX_GRID_SIZE = 60
 
 export function createDepthParticles(width: number, height: number): DepthParticle[] {
@@ -12,7 +14,7 @@ export function createDepthParticles(width: number, height: number): DepthPartic
       x: Math.random() * width * 2 - width * 0.5,
       y: Math.random() * height * 2 - height * 0.5,
       size: Math.random() * 1.5 + 0.5,
-      brightness: Math.random() * 0.3 + 0.05,
+      brightness: Math.random() * 0.12 + 0.03,
       speed: Math.random() * 0.15 + 0.05,
       depth: Math.random(),
     })

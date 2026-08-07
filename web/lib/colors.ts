@@ -1,220 +1,271 @@
 /**
- * Holographic color palette and role color definitions.
+ * Light, minimalist, Apple-inspired color palette.
  *
- * Extracted from agent-types.ts to keep that file focused on type definitions.
- * All colors are re-exported from agent-types.ts for backward compatibility.
+ * Design language: Apple Human Interface Guidelines — clarity, deference, depth.
+ * Light mode is the default and primary theme. Depth comes from soft shadows,
+ * hairline borders and layering — NOT from luminance/glow.
+ *
+ * ── Encoding contract (do not break) ─────────────────────────────────────────
+ * Both the Canvas 2D layer and the React/DOM overlay read from this one object.
+ * The canvas cannot read CSS variables, so every color is a concrete JS string.
+ *
+ *  1. Any token consumed by hex-alpha concatenation (`color + '90'`, `+ '25'`,
+ *     `+ alphaHex(a)`) MUST stay a 6-digit hex string. That covers every state,
+ *     accent, role, discovery, edge/particle color plus `holoBase/Bright/Hot`,
+ *     `textPrimary`, and the semantic hexes below. Never make these `rgb()`,
+ *     `oklch()`, named colors, or 8-digit hex.
+ *  2. Tokens consumed by `withAlpha()` (the "canvas … Base" keys) MUST keep the
+ *     partial-rgba shape `'rgba(r, g, b,'` — trailing comma, no closing paren.
+ *     Replace the numbers, never the format.
+ *  3. Tokens used only as a direct color (never concatenated) may bake alpha as
+ *     8-digit hex or `rgba(...)`.
+ *
+ * Extracted from agent-types.ts; re-exported there for backward compatibility.
  */
 
 import type { AgentState, ContextBreakdown } from './agent-types'
 
-// Holographic Color Palette
+// ─── Seed constants ──────────────────────────────────────────────────────────
+// The whole palette derives from these. Recolor the app by editing the seeds:
+// each family has a 6-digit HEX (for hex-alpha concat) and an RGB triple (for
+// rgba() literals). Swap a pair and both layers move together.
+
+/** Apple system blue — the single accent, used sparingly. */
+const ACCENT_HEX = '#0071e3'
+const ACCENT_RGB = '0, 113, 227'
+/** complete / success. */
+const GREEN_HEX = '#248a3d'
+const GREEN_RGB = '36, 138, 61'
+/** tool_calling / expensive — darkened so it is legible on white. */
+const AMBER_HEX = '#a15c00'
+const AMBER_RGB = '161, 92, 0'
+/** error. */
+const RED_HEX = '#d70015'
+const RED_RGB = '215, 0, 21'
+/** thinking / reasoning / dispatch. */
+const PURPLE_HEX = '#5e5ce6'
+const PURPLE_RGB = '94, 92, 230'
+/** waiting_permission — legible orange. */
+const ORANGE_HEX = '#b45309'
+
+// Apple label hierarchy (neutral — never tint body text with the accent).
+// Secondary/tertiary are nudged slightly darker than Apple's #6e6e73/#86868b so
+// they clear WCAG AA (≥4.5:1) on white at the 12px floor, while keeping a clear
+// three-step hierarchy.
+const INK = '#1d1d1f' // primary label   (~16:1)
+const INK2 = '#5c5c60' // secondary label (~5.4:1)
+const INK3 = '#6e6e73' // tertiary label  (~4.6:1)
+const HAIRLINE = '0, 0, 0' // rgb triple for hairline borders / dividers
+
+// ─── Apple Light Palette ─────────────────────────────────────────────────────
 export const COLORS = {
-  // Background
-  void: '#050510',
-  hexGrid: '#0d0d1f',
+  // Surfaces — layered near-whites (Apple's signature light grays)
+  void: '#f5f5f7',
+  hexGrid: '#d2d2d7',
 
-  // Primary Hologram
-  holoBase: '#66ccff',
-  holoBright: '#aaeeff',
-  holoHot: '#ffffff',
+  // Primary accent ramp. `holoBright`/`holoHot` render as DOM text / canvas
+  // flashes, so they must read on white — accent blue, not a bright tint.
+  holoBase: ACCENT_HEX,
+  holoBright: ACCENT_HEX,
+  holoHot: ACCENT_HEX,
 
-  // Agent States
-  idle: '#66ccff',
-  thinking: '#66ccff',
-  tool_calling: '#ffbb44',
-  complete: '#66ffaa',
-  error: '#ff5566',
-  paused: '#888899',
-  waiting_permission: '#ffaa33',
+  // Agent States (6-digit hex — flow into `getStateColor` and hex-alpha concat)
+  idle: ACCENT_HEX,
+  thinking: PURPLE_HEX,
+  tool_calling: AMBER_HEX,
+  complete: GREEN_HEX,
+  error: RED_HEX,
+  paused: INK3,
+  waiting_permission: ORANGE_HEX,
 
   // Edge/Particle Colors
-  dispatch: '#cc88ff',
-  return: '#66ffaa',
-  tool: '#ffbb44',
-  message: '#66ccff',
+  dispatch: PURPLE_HEX,
+  return: GREEN_HEX,
+  tool: AMBER_HEX,
+  message: ACCENT_HEX,
 
   // Context breakdown colors
-  contextSystem: '#555577',     // gray-blue — fixed overhead
-  contextUser: '#66ccff',       // blue — user input
-  contextToolResults: '#ffbb44', // amber — expensive!
-  contextReasoning: '#cc88ff',  // purple — agent thinking
-  contextSubagent: '#66ffaa',   // green — child agent results
+  contextSystem: '#8e8e93',     // neutral gray — fixed overhead
+  contextUser: ACCENT_HEX,      // blue — user input
+  contextToolResults: AMBER_HEX, // amber — expensive!
+  contextReasoning: PURPLE_HEX,  // purple — agent thinking
+  contextSubagent: GREEN_HEX,    // green — child agent results
 
   // UI Chrome
-  nodeInterior: 'rgba(10, 15, 40, 0.5)',
-  textPrimary: '#aaeeff',
-  textDim: '#66ccff90',
-  textMuted: '#66ccff50',
+  nodeInterior: 'rgba(255, 255, 255, 0.9)',
+  textPrimary: INK,
+  textDim: INK2,
+  textMuted: INK3,
 
-  // Glass card
-  glassBg: 'rgba(10, 15, 30, 0.7)',
-  glassBorder: 'rgba(100, 200, 255, 0.15)',
-  glassHighlight: 'rgba(100, 200, 255, 0.08)',
+  // Glass card — light "vibrancy" material: translucent white + hairline
+  glassBg: 'rgba(255, 255, 255, 0.72)',
+  glassBorder: `rgba(${HAIRLINE}, 0.1)`,
+  glassHighlight: 'rgba(255, 255, 255, 0.6)',
 
-  // Holo background/border opacities (avoids scattered rgba literals)
-  holoBg03: 'rgba(100, 200, 255, 0.03)',
-  holoBg05: 'rgba(100, 200, 255, 0.05)',
-  holoBg10: 'rgba(100, 200, 255, 0.1)',
-  holoBorder06: 'rgba(100, 200, 255, 0.06)',
-  holoBorder08: 'rgba(100, 200, 255, 0.08)',
-  holoBorder10: 'rgba(100, 200, 255, 0.1)',
-  holoBorder12: 'rgba(100, 200, 255, 0.12)',
+  // Accent-tinted subtle fills; neutral hairline borders
+  holoBg03: `rgba(${ACCENT_RGB}, 0.04)`,
+  holoBg05: `rgba(${ACCENT_RGB}, 0.06)`,
+  holoBg10: `rgba(${ACCENT_RGB}, 0.1)`,
+  holoBorder06: `rgba(${HAIRLINE}, 0.06)`,
+  holoBorder08: `rgba(${HAIRLINE}, 0.08)`,
+  holoBorder10: `rgba(${HAIRLINE}, 0.1)`,
+  holoBorder12: `rgba(${HAIRLINE}, 0.12)`,
 
   // Panel chrome
-  panelBg: 'rgba(8, 12, 24, 0.85)',
-  panelSeparator: 'rgba(100, 200, 255, 0.04)',
+  panelBg: 'rgba(255, 255, 255, 0.85)',
+  panelSeparator: `rgba(${HAIRLINE}, 0.06)`,
 
   // Toggle button states
-  toggleActive: 'rgba(100, 200, 255, 0.15)',
-  toggleInactive: 'rgba(100, 200, 255, 0.05)',
-  toggleBorder: 'rgba(100, 200, 255, 0.1)',
+  toggleActive: `rgba(${ACCENT_RGB}, 0.14)`,
+  toggleInactive: `rgba(${HAIRLINE}, 0.04)`,
+  toggleBorder: `rgba(${HAIRLINE}, 0.1)`,
 
   // Live indicator
-  liveDot: '#ff4444',
-  liveText: '#ff6666',
-  liveResumeBg: 'rgba(255, 68, 68, 0.15)',
-  liveResumeBorder: 'rgba(255, 68, 68, 0.35)',
+  liveDot: '#ff3b30',
+  liveText: RED_HEX,
+  liveResumeBg: `rgba(${RED_RGB}, 0.1)`,
+  liveResumeBorder: `rgba(${RED_RGB}, 0.3)`,
 
   // Discovery type colors
-  discoveryFile: '#66ccff',
-  discoveryPattern: '#cc88ff',
-  discoveryFinding: '#66ffaa',
-  discoveryCode: '#ffbb44',
+  discoveryFile: ACCENT_HEX,
+  discoveryPattern: PURPLE_HEX,
+  discoveryFinding: GREEN_HEX,
+  discoveryCode: AMBER_HEX,
 
   // Session tab states
-  tabSelectedBg: 'rgba(100, 200, 255, 0.15)',
-  tabInactiveBg: 'rgba(100, 200, 255, 0.03)',
-  tabSelectedBorder: 'rgba(100, 200, 255, 0.3)',
-  tabInactiveBorder: 'rgba(100, 200, 255, 0.08)',
-  tabClose: '#ff6688',
+  tabSelectedBg: `rgba(${ACCENT_RGB}, 0.12)`,
+  tabInactiveBg: `rgba(${HAIRLINE}, 0.03)`,
+  tabSelectedBorder: `rgba(${ACCENT_RGB}, 0.5)`,
+  tabInactiveBorder: `rgba(${HAIRLINE}, 0.08)`,
+  tabClose: INK3,
 
-  // Role colors (message bubbles)
-  roleAssistantBg: 'rgba(80, 160, 220, 0.12)',
-  roleAssistantBgSelected: 'rgba(80, 160, 220, 0.2)',
-  roleAssistantText: '#a0d4f0',
-  roleThinkingBg: 'rgba(140, 100, 200, 0.12)',
-  roleThinkingBgSelected: 'rgba(140, 100, 200, 0.2)',
-  roleThinkingText: '#c0a0e0',
-  roleUserBg: 'rgba(200, 160, 80, 0.12)',
-  roleUserBgSelected: 'rgba(200, 160, 80, 0.2)',
-  roleUserText: '#e0c888',
+  // Role colors (message bubbles) — tint behind dark, legible role text
+  roleAssistantBg: `rgba(${ACCENT_RGB}, 0.1)`,
+  roleAssistantBgSelected: `rgba(${ACCENT_RGB}, 0.18)`,
+  roleAssistantText: '#0058b0',
+  roleThinkingBg: `rgba(${PURPLE_RGB}, 0.1)`,
+  roleThinkingBgSelected: `rgba(${PURPLE_RGB}, 0.18)`,
+  roleThinkingText: '#4b49c4',
+  roleUserBg: `rgba(${AMBER_RGB}, 0.1)`,
+  roleUserBgSelected: `rgba(${AMBER_RGB}, 0.18)`,
+  roleUserText: '#8a5000',
 
   // Result/success
-  resultBg: 'rgba(102, 255, 170, 0.05)',
-  resultBorder: 'rgba(102, 255, 170, 0.1)',
+  resultBg: `rgba(${GREEN_RGB}, 0.06)`,
+  resultBorder: `rgba(${GREEN_RGB}, 0.14)`,
 
   // Unread indicator
-  unreadDot: '#ff6666',
+  unreadDot: '#ff3b30',
 
   // Play button
-  playBtnBg: 'rgba(102, 204, 255, 0.12)',
-  playBtnActiveBg: 'rgba(102, 204, 255, 0.2)',
-  playBtnBorder: 'rgba(102, 204, 255, 0.4)',
-  playBtnGlow: '0 0 12px rgba(102, 204, 255, 0.15)',
+  playBtnBg: `rgba(${ACCENT_RGB}, 0.1)`,
+  playBtnActiveBg: `rgba(${ACCENT_RGB}, 0.18)`,
+  playBtnBorder: `rgba(${ACCENT_RGB}, 0.4)`,
+  playBtnGlow: `0 1px 3px rgba(${HAIRLINE}, 0.1)`,
 
   // Scrubber
-  scrubberFill: 'linear-gradient(90deg, rgba(102,204,255,0.3), rgba(102,204,255,0.6))',
-  scrubberHeadGlow: '0 0 10px rgba(102, 204, 255, 0.6), 0 0 20px rgba(102, 204, 255, 0.2)',
-  reviewBtnBorder: 'rgba(102, 204, 255, 0.25)',
+  scrubberFill: `linear-gradient(90deg, rgba(${ACCENT_RGB},0.5), rgba(${ACCENT_RGB},0.85))`,
+  scrubberHeadGlow: `0 1px 4px rgba(${HAIRLINE}, 0.18)`,
+  reviewBtnBorder: `rgba(${ACCENT_RGB}, 0.35)`,
 
   // Cost overlay
-  costActiveBg: 'rgba(102, 255, 170, 0.15)',
+  costActiveBg: `rgba(${GREEN_RGB}, 0.12)`,
 
   // Canvas drawing — bubble base colors (partial rgba, alpha appended at draw time)
-  bubbleThinkingBase: 'rgba(140, 100, 200,',
-  bubbleUserBase: 'rgba(200, 160, 80,',
-  bubbleAssistantBase: 'rgba(80, 160, 220,',
+  bubbleThinkingBase: `rgba(${PURPLE_RGB},`,
+  bubbleUserBase: `rgba(${AMBER_RGB},`,
+  bubbleAssistantBase: `rgba(${ACCENT_RGB},`,
 
   // Canvas drawing — tool card backgrounds (partial rgba, alpha appended at draw time)
-  toolCardErrorBase: 'rgba(40, 10, 15,',
-  toolCardSelectedBase: 'rgba(100, 200, 255,',
-  toolCardBase: 'rgba(10, 15, 30,',
+  toolCardErrorBase: `rgba(${RED_RGB},`,
+  toolCardSelectedBase: `rgba(${ACCENT_RGB},`,
+  toolCardBase: 'rgba(255, 255, 255,',
 
   // Canvas drawing — agent/tool card backgrounds
-  cardBgDark: 'rgba(5, 5, 16, 0.8)',
-  cardBg: 'rgba(10, 15, 30, 0.6)',
-  cardBgSelected: 'rgba(10, 15, 30, 0.8)',
-  cardBgError: 'rgba(40, 10, 15, 0.8)',
-  cardBgSelectedHolo: 'rgba(100, 200, 255, 0.15)',
+  cardBgDark: 'rgba(255, 255, 255, 0.92)',
+  cardBg: 'rgba(255, 255, 255, 0.7)',
+  cardBgSelected: 'rgba(255, 255, 255, 0.96)',
+  cardBgError: `rgba(255, 238, 238, 0.92)`,
+  cardBgSelectedHolo: `rgba(${ACCENT_RGB}, 0.14)`,
   cardBgFaintOverlay: 'rgba(0, 0, 0, 0.01)',
 
   // Active tool indicator (detail card)
-  toolIndicatorBg: 'rgba(255, 187, 68, 0.1)',
-  toolIndicatorBorder: 'rgba(255, 187, 68, 0.2)',
-  toolIndicatorText: '#ffbb44',
+  toolIndicatorBg: `rgba(${AMBER_RGB}, 0.1)`,
+  toolIndicatorBorder: `rgba(${AMBER_RGB}, 0.22)`,
+  toolIndicatorText: AMBER_HEX,
 
   // Canvas drawing — cost labels
-  costText: '#66ffaa',
-  costTextDim: '#66ffaa80',
-  costPillBg: 'rgba(10, 20, 40, 0.75)',
-  costPillStroke: 'rgba(102, 255, 170, 0.3)',
+  costText: GREEN_HEX,
+  costTextDim: '#248a3d99',
+  costPillBg: 'rgba(255, 255, 255, 0.85)',
+  costPillStroke: `rgba(${GREEN_RGB}, 0.35)`,
 
   // Canvas drawing — cost panel bar fills
-  barFillMain: 'rgba(102, 204, 255, 0.15)',
-  barFillSub: 'rgba(204, 136, 255, 0.15)',
+  barFillMain: `rgba(${ACCENT_RGB}, 0.15)`,
+  barFillSub: `rgba(${PURPLE_RGB}, 0.15)`,
 
   // ─── Transcript / message feed colors ───────────────────────────────────────
 
   // User messages
-  userMsgBg: 'rgba(255, 187, 68, 0.06)',
-  userMsgBorder: 'rgba(255, 187, 68, 0.12)',
-  userLabel: '#ffbb4490',
-  userText: '#ffcc66',
+  userMsgBg: `rgba(${AMBER_RGB}, 0.06)`,
+  userMsgBorder: `rgba(${AMBER_RGB}, 0.14)`,
+  userLabel: '#a15c00aa',
+  userText: '#8a5000',
 
   // Assistant messages
-  assistantLabel: '#66ccff80',
-  assistantText: '#aaeeff',
+  assistantLabel: '#0071e3aa',
+  assistantText: INK,
 
   // Thinking messages
-  thinkingBgExpanded: 'rgba(180, 140, 255, 0.06)',
-  thinkingBgCollapsed: 'rgba(180, 140, 255, 0.03)',
-  thinkingBorder: 'rgba(180, 140, 255, 0.08)',
-  thinkingLabel: '#bb99ff70',
-  thinkingArrow: '#bb99ff55',
-  thinkingPreview: '#bb99ff',
-  thinkingTextExpanded: '#bb99ff80',
-  thinkingBorderLeft: 'rgba(180, 140, 255, 0.15)',
+  thinkingBgExpanded: `rgba(${PURPLE_RGB}, 0.06)`,
+  thinkingBgCollapsed: `rgba(${PURPLE_RGB}, 0.03)`,
+  thinkingBorder: `rgba(${PURPLE_RGB}, 0.1)`,
+  thinkingLabel: '#5e5ce6aa',
+  thinkingArrow: '#5e5ce688',
+  thinkingPreview: PURPLE_HEX,
+  thinkingTextExpanded: '#5e5ce6cc',
+  thinkingBorderLeft: `rgba(${PURPLE_RGB}, 0.2)`,
 
   // Tool call messages
-  toolCallBg: 'rgba(255, 187, 68, 0.05)',
-  toolCallBorder: 'rgba(255, 187, 68, 0.1)',
+  toolCallBg: `rgba(${AMBER_RGB}, 0.05)`,
+  toolCallBorder: `rgba(${AMBER_RGB}, 0.12)`,
 
   // Tool result messages
-  bashResultBg: 'rgba(0,0,0,0.25)',
-  toolResultBg: 'rgba(102, 255, 170, 0.04)',
-  bashResultBorder: 'rgba(255, 187, 68, 0.1)',
-  toolResultBorder: 'rgba(102, 255, 170, 0.08)',
-  bashResultText: '#aaeeff80',
-  toolResultText: '#66ffaa80',
-  textFaint: '#aaeeff60',
+  bashResultBg: `rgba(${HAIRLINE}, 0.04)`,
+  toolResultBg: `rgba(${GREEN_RGB}, 0.05)`,
+  bashResultBorder: `rgba(${AMBER_RGB}, 0.12)`,
+  toolResultBorder: `rgba(${GREEN_RGB}, 0.12)`,
+  bashResultText: '#3a3a3c',
+  toolResultText: '#1a6e30',
+  textFaint: INK3,
 
   // Search highlight
-  searchHighlightBg: 'rgba(255,187,68,0.3)',
+  searchHighlightBg: 'rgba(255, 214, 10, 0.55)',
 
   // ─── Diff / code block colors ───────────────────────────────────────────────
 
-  codeBlockBg: 'rgba(0,0,0,0.3)',
-  diffRemoved: '#ff6666',
-  diffRemovedBg: 'rgba(255,80,80,0.08)',
-  diffAdded: '#66ff88',
-  diffAddedBg: 'rgba(80,255,120,0.08)',
+  codeBlockBg: `rgba(${HAIRLINE}, 0.04)`,
+  diffRemoved: RED_HEX,
+  diffRemovedBg: `rgba(${RED_RGB},0.08)`,
+  diffAdded: GREEN_HEX,
+  diffAddedBg: `rgba(${GREEN_RGB},0.08)`,
 
   // ─── Tool content colors ────────────────────────────────────────────────────
 
-  filePathActive: '#66ccff',
-  filePathInactive: '#66ccff90',
-  todoCompleted: '#66ffaa',
-  todoCompletedText: '#66ffaa90',
-  todoPending: '#66ccff60',
-  contentDim: '#aaeeff90',
-  searchIcon: '#66ccff60',
+  filePathActive: ACCENT_HEX,
+  filePathInactive: '#0071e3aa',
+  todoCompleted: GREEN_HEX,
+  todoCompletedText: '#248a3daa',
+  todoPending: INK2,
+  contentDim: '#3a3a3c',
+  searchIcon: INK3,
 
   // ─── Panel header / chrome text ─────────────────────────────────────────────
 
-  panelLabel: '#66ccff90',
-  panelLabelDim: '#66ccff65',
-  scrollBtnText: '#66ccff',
-  scrollbarThumb: 'rgba(100,200,255,0.15)',
+  panelLabel: INK2,
+  panelLabelDim: INK3,
+  scrollBtnText: ACCENT_HEX,
+  scrollbarThumb: `rgba(${HAIRLINE}, 0.18)`,
 } as const
 
 // ─── Role Colors (message feed & bubbles) ───────────────────────────────────

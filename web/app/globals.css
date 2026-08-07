@@ -10,7 +10,7 @@
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
+  --primary: oklch(0.58 0.16 250);
   --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
@@ -22,13 +22,33 @@
   --destructive-foreground: oklch(0.577 0.245 27.325);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --ring: oklch(0.58 0.16 250);
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
-  --radius: 0.625rem;
+  --radius: 0.75rem;
+
+  /* ── Light "vibrancy" material — the single accent + glass tokens.
+     Mirrored from the JS COLORS seed so the DOM CSS and the canvas share
+     one accent. Keep the accent rgb triple in sync with ACCENT_RGB in
+     web/lib/colors.ts. ── */
+  --accent-rgb: 0, 113, 227;
+  --hairline-rgb: 0, 0, 0;
+  --glass-bg: rgba(255, 255, 255, 0.72);
+  --glass-border: rgba(var(--hairline-rgb), 0.1);
+  --glass-highlight: rgba(255, 255, 255, 0.6);
+  --glass-shadow: 0 1px 2px rgba(var(--hairline-rgb), 0.04), 0 4px 12px rgba(var(--hairline-rgb), 0.06);
+  --glass-radius: 12px;
+  --input-bg: rgba(var(--hairline-rgb), 0.03);
+  --input-border: rgba(var(--hairline-rgb), 0.12);
+  --input-text: #1d1d1f;
+  --input-placeholder: rgba(var(--hairline-rgb), 0.35);
+  --focus-ring: rgba(var(--accent-rgb), 0.55);
+  --scrollbar-thumb: rgba(var(--hairline-rgb), 0.18);
+  --scrollbar-thumb-hover: rgba(var(--hairline-rgb), 0.3);
+
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: oklch(0.205 0 0);
@@ -75,8 +95,8 @@
 }
 
 @theme inline {
-  --font-sans: 'Geist', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Helvetica Neue', Arial, ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'SF Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -124,17 +144,16 @@
   }
 }
 
-/* Glass card effect */
+/* Frosted-glass material — Apple "vibrancy": translucent white, a hairline
+   border, and a soft diffuse shadow (depth via shadow + layering, not glow). */
 .glass-card {
-  background: rgba(10, 15, 30, 0.7);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(100, 200, 255, 0.15);
-  border-radius: 8px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--glass-radius);
   padding: 12px;
-  box-shadow:
-    0 0 20px rgba(0, 0, 0, 0.3),
-    inset 0 1px 0 rgba(100, 200, 255, 0.08);
+  box-shadow: var(--glass-shadow);
 }
 
 .glass-card::before {
@@ -144,41 +163,36 @@
   left: 0;
   right: 0;
   height: 1px;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(100, 200, 255, 0.15),
-    transparent
-  );
-  border-radius: 8px 8px 0 0;
+  background: var(--glass-highlight);
+  border-radius: var(--glass-radius) var(--glass-radius) 0 0;
   pointer-events: none;
 }
 
-/* Glass card inputs */
+/* Inputs — light fields; monospace reserved for genuinely tabular/code fields */
 .glass-card input,
 .glass-card textarea,
 .glass-card select {
-  background: rgba(100, 200, 255, 0.05) !important;
-  border: 1px solid rgba(100, 200, 255, 0.15) !important;
-  color: #aaeeff !important;
-  font-family: monospace;
+  background: var(--input-bg) !important;
+  border: 1px solid var(--input-border) !important;
+  color: var(--input-text) !important;
+  font-family: var(--font-sans);
 }
 
 .glass-card input::placeholder,
 .glass-card textarea::placeholder {
-  color: rgba(102, 204, 255, 0.3);
+  color: var(--input-placeholder);
 }
 
 .glass-card input:focus,
 .glass-card textarea:focus {
-  border-color: rgba(102, 204, 255, 0.3) !important;
+  border-color: var(--focus-ring) !important;
   outline: none;
-  box-shadow: 0 0 8px rgba(102, 204, 255, 0.1);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.18);
 }
 
 /* Custom scrollbar for glass cards */
 .glass-card ::-webkit-scrollbar {
-  width: 4px;
+  width: 6px;
 }
 
 .glass-card ::-webkit-scrollbar-track {
@@ -186,12 +200,12 @@
 }
 
 .glass-card ::-webkit-scrollbar-thumb {
-  background: rgba(100, 200, 255, 0.15);
-  border-radius: 2px;
+  background: var(--scrollbar-thumb);
+  border-radius: 3px;
 }
 
 .glass-card ::-webkit-scrollbar-thumb:hover {
-  background: rgba(100, 200, 255, 0.25);
+  background: var(--scrollbar-thumb-hover);
 }
 
 /* Hide scrollbar but keep scroll functionality */
@@ -201,4 +215,48 @@
 }
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
+}
+
+/* ── Typography: the whole UI reads as the SF/system stack. `font-mono` is
+   remapped to the system stack so metadata labels read as Apple UI text;
+   genuinely tabular/code content opts back into monospace via `.font-code`. ── */
+.font-mono {
+  font-family: var(--font-sans);
+}
+.font-code {
+  font-family: var(--font-mono);
+}
+
+/* Accessibility: floor the dense metadata sizes so nothing is sub-12px. */
+.text-\[8px\],
+.text-\[9px\],
+.text-\[10px\] {
+  font-size: 12px;
+}
+.text-\[11px\] {
+  font-size: 12.5px;
+}
+
+/* Visible keyboard focus on all interactive DOM controls. */
+button:focus-visible,
+a:focus-visible,
+[role='button']:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.9);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Honor reduced-motion: cut non-essential DOM transitions/animations. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }

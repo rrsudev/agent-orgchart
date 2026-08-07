@@ -64,7 +64,7 @@ export function AgentVisualizer() {
   const selection = useSelectionState({ agents, toolCalls, discoveries })
 
   const [showStats, setShowStats] = useState(false)
-  const [showHexGrid, setShowHexGrid] = useState(true)
+  const [showHexGrid, setShowHexGrid] = useState(false)
   const [showCostOverlay, setShowCostOverlay] = useState(false)
   const [showTimeline, setShowTimeline] = useState(false)
   const [showFileAttention, setShowFileAttention] = useState(false)

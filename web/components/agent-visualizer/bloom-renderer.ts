@@ -37,6 +37,10 @@ export class BloomRenderer {
     const w = this.bloomCanvas.width
     const h = this.bloomCanvas.height
 
+    // Additive bloom brightens pixels — on a light canvas it washes the scene
+    // to white and destroys legibility. Disabled in the light theme (intensity
+    // 0); skip all work rather than compositing a fully-transparent pass.
+    if (this.intensity <= 0) return
     if (w === 0 || h === 0 || !this.enabled) return
 
     // Draw source at half resolution

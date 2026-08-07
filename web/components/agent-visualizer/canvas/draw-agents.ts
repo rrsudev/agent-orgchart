@@ -175,7 +175,7 @@ export function drawContextRing(
 
 function drawDepthShadow(ctx: CanvasRenderingContext2D, agent: Agent, r: number) {
   ctx.save()
-  ctx.shadowColor = 'rgba(0, 0, 0, 0.5)'
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.12)'
   ctx.shadowBlur = AGENT_DRAW.shadowBlur
   ctx.shadowOffsetX = AGENT_DRAW.shadowOffsetX
   ctx.shadowOffsetY = AGENT_DRAW.shadowOffsetY
@@ -187,7 +187,8 @@ function drawDepthShadow(ctx: CanvasRenderingContext2D, agent: Agent, r: number)
 
 function drawAgentGlow(ctx: CanvasRenderingContext2D, agent: Agent, r: number, color: string, isHovered: boolean, isSelected: boolean, isWaiting: boolean) {
   const glowR = r + AGENT_DRAW.glowPadding
-  const glowAlpha = isHovered || isSelected ? 0.35 : isWaiting ? 0.3 : agent.state === 'thinking' ? 0.2 : 0.1
+  // Softer halos on light — a subtle colored shadow, never a luminance bloom.
+  const glowAlpha = isHovered || isSelected ? 0.18 : isWaiting ? 0.16 : agent.state === 'thinking' ? 0.12 : 0.06
   // Pre-rendered glow sprite instead of per-frame gradient creation
   const sprite = getAgentGlowSprite(color, Math.round(r * 0.5), Math.ceil(glowR), alphaHex(glowAlpha))
   ctx.drawImage(sprite, agent.x - Math.ceil(glowR), agent.y - Math.ceil(glowR))

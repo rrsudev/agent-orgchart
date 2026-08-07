@@ -23,6 +23,14 @@ import {
 import { useCanvasCamera } from '@/hooks/use-canvas-camera'
 import { useCanvasInteraction } from '@/hooks/use-canvas-interaction'
 
+/** Respect the OS "reduce motion" setting — freezes non-essential canvas drift
+ *  (parallax depth particles). Evaluated once at module load; guarded for SSR
+ *  and the VS Code webview / Vite standalone builds. */
+const PREFERS_REDUCED_MOTION =
+  typeof window !== 'undefined' &&
+  typeof window.matchMedia === 'function' &&
+  window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
 interface CanvasProps {
   /** Ref to simulation state — read every frame without React re-renders */
   simulationRef: React.RefObject<SimulationState>
@@ -125,7 +133,9 @@ export function AgentCanvas({
   // ─── Setup ──────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    bloomRef.current = new BloomRenderer(0.5)
+    // Bloom disabled for the light theme — additive glow washes out a light
+    // canvas. Depth comes from soft shadows and layering instead.
+    bloomRef.current = new BloomRenderer(0)
     depthParticlesRef.current = createDepthParticles(dimensions.width, dimensions.height)
     return () => { bloomRef.current = null }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- particles created once, resized by draw loop
@@ -236,7 +246,7 @@ export function AgentCanvas({
       }
 
       ctx.clearRect(0, 0, w, h)
-      updateDepthParticles(depthParticlesRef.current, deltaTime, w, h)
+      if (!PREFERS_REDUCED_MOTION) updateDepthParticles(depthParticlesRef.current, deltaTime, w, h)
 
       let activeAgentPos: { x: number; y: number; color: string } | undefined
       for (const [, agent] of agents) {

@@ -198,14 +198,14 @@ export const AGENT_DRAW = {
   bubbleAnchorOffset: 14,
   /** Initial cursor Y offset for bubbles */
   bubbleCursorY: -20,
-  /** Outer glow extra radius beyond agent radius */
-  glowPadding: 20,
+  /** Outer glow extra radius beyond agent radius (soft halo, not luminance) */
+  glowPadding: 10,
   /** Ambient outer hex ring offset from agent radius */
   outerRingOffset: 3,
-  /** Shadow blur for depth shadow */
-  shadowBlur: 15,
-  shadowOffsetX: 3,
-  shadowOffsetY: 5,
+  /** Soft diffuse depth shadow (Apple-style, low blur/offset) */
+  shadowBlur: 10,
+  shadowOffsetX: 0,
+  shadowOffsetY: 2,
   /** Agent name label Y offset from agent radius */
   labelYOffset: 8,
   /** Agent name label width multiplier of radius */
@@ -265,7 +265,7 @@ export const CONTEXT_RING = {
   /** Warning glow extra radius */
   glowPadding: 4,
   glowLineWidth: 2,
-  glowBlur: 12,
+  glowBlur: 6,
   /** Percentage label Y offset from radius */
   percentYOffset: 10,
 } as const
@@ -288,9 +288,9 @@ export const TOOL_DRAW = {
   /** Extra height for completed/error cards showing token cost */
   expandedHeight: 30,
   collapsedHeight: 24,
-  /** Error glow base blur + pulse amplitude */
-  errorGlowBase: 8,
-  errorGlowPulse: 4,
+  /** Error glow base blur + pulse amplitude (toned down for light theme) */
+  errorGlowBase: 4,
+  errorGlowPulse: 2,
   /** Spinning ring extra radius beyond card half-size */
   spinRingPadding: 4,
   spinSpeed: 3,
@@ -371,14 +371,14 @@ export const COMPLETE_FX = {
   flashAlpha: 0.8,
   flashRadius: 30,
   lineWidthMax: 3,
-  glowInner: 5,
-  glowOuter: 10,
+  glowInner: 3,
+  glowOuter: 6,
 } as const
 
 // ─── Particle drawing constants ─────────────────────────────────────────────
 
 export const PARTICLE_DRAW = {
-  glowRadius: 15,
+  glowRadius: 8,
   coreHighlightScale: 0.4,
   labelMinT: 0.2,
   labelMaxT: 0.8,
