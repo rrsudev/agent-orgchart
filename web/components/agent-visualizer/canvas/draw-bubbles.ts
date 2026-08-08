@@ -1,6 +1,6 @@
 import { Agent, NODE } from '@/lib/agent-types'
 import { COLORS, withAlpha } from '@/lib/colors'
-import { BUBBLE_MAX_W, BUBBLE_GAP, BUBBLE_MAX_LINES, AGENT_DRAW, BUBBLE_DRAW } from '@/lib/canvas-constants'
+import { BUBBLE_MAX_W, BUBBLE_GAP, BUBBLE_MAX_LINES, AGENT_DRAW, BUBBLE_DRAW, CANVAS_FONT } from '@/lib/canvas-constants'
 import { bubbleAlpha } from './bubble-utils'
 import { measureTextCached } from './render-cache'
 
@@ -35,7 +35,7 @@ export function drawMessageBubblesWorld(
       // Thinking bubbles: smaller font, tighter spacing, more translucent
       const style = isThinking ? BUBBLE_DRAW.thinking : BUBBLE_DRAW.normal
 
-      const font = `${style.fontSize}px monospace`
+      const font = `${style.fontSize}px ${CANVAS_FONT.sans}`
       ctx.font = font
       // Cache wrapped lines on the bubble to avoid re-wrapping every frame
       let allLines: string[]
@@ -79,13 +79,13 @@ export function drawMessageBubblesWorld(
       ctx.lineWidth = 0.5
       ctx.stroke()
 
-      ctx.font = `${style.labelSize}px monospace`
+      ctx.font = `600 ${style.labelSize}px ${CANVAS_FONT.sans}`
       ctx.textAlign = 'left'
       ctx.textBaseline = 'top'
       ctx.fillStyle = textColor + (isThinking ? '60' : '80')
       ctx.fillText(label, anchorX + style.padding, cursorY + 3)
 
-      ctx.font = `italic ${style.fontSize}px monospace`
+      ctx.font = `${style.fontSize}px ${CANVAS_FONT.sans}`
       ctx.fillStyle = textColor + (isThinking ? 'b0' : '')
       for (let i = 0; i < lines.length; i++) {
         ctx.fillText(lines[i], anchorX + style.padding, cursorY + style.headerH + i * style.lineH)

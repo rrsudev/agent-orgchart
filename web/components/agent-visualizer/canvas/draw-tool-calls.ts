@@ -1,6 +1,6 @@
 import { ToolCallNode } from '@/lib/agent-types'
 import { COLORS, withAlpha } from '@/lib/colors'
-import { TOOL_MAX_CARD_W, TOOL_DRAW } from '@/lib/canvas-constants'
+import { TOOL_MAX_CARD_W, TOOL_DRAW, PREFERS_REDUCED_MOTION } from '@/lib/canvas-constants'
 import { truncateText } from './draw-misc'
 import { measureTextCached } from './render-cache'
 
@@ -13,7 +13,6 @@ export function drawToolCalls(
   for (const [id, tool] of toolCalls) {
     const isRunning = tool.state === 'running'
     const isError = tool.state === 'error'
-    const pulse = isRunning ? Math.sin(time * 4) * 0.2 + 0.8 : isError ? Math.sin(time * 6) * 0.15 + 0.85 : 0.5
 
     ctx.save()
     ctx.globalAlpha = tool.opacity
@@ -29,48 +28,38 @@ export function drawToolCalls(
 
     const isSelected = id === selectedToolCallId
 
-    // Error glow
-    if (isError) {
-      ctx.shadowColor = COLORS.error
-      ctx.shadowBlur = TOOL_DRAW.errorGlowBase + Math.sin(time * 6) * TOOL_DRAW.errorGlowPulse
-    }
-
+    // Flat card: solid white fill + single soft elevation shadow + hairline
+    // border in the state color (no glow / crack lines).
+    ctx.save()
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.1)'
+    ctx.shadowBlur = 8
+    ctx.shadowOffsetY = 2
     ctx.beginPath()
     ctx.roundRect(cardX, cardY, cardW, cardH, TOOL_DRAW.borderRadius)
     ctx.fillStyle = isError
-      ? withAlpha(COLORS.toolCardErrorBase, 0.8 * pulse)
-      : isSelected ? withAlpha(COLORS.toolCardSelectedBase, 0.15 * pulse) : withAlpha(COLORS.toolCardBase, 0.7 * pulse)
+      ? withAlpha(COLORS.toolCardErrorBase, 0.1)
+      : isSelected ? withAlpha(COLORS.toolCardSelectedBase, 0.1) : withAlpha(COLORS.toolCardBase, 0.96)
     ctx.fill()
+    ctx.restore()
+
+    ctx.beginPath()
+    ctx.roundRect(cardX, cardY, cardW, cardH, TOOL_DRAW.borderRadius)
     ctx.strokeStyle = isError
-      ? COLORS.error + '90'
-      : isSelected ? COLORS.holoBase + 'aa' : isRunning ? COLORS.tool + '60' : COLORS.return + '40'
-    ctx.lineWidth = isError ? 2 : isSelected ? 1.5 : 1
+      ? COLORS.error
+      : isSelected ? COLORS.holoBase : isRunning ? COLORS.tool : COLORS.return + '90'
+    ctx.lineWidth = (isError || isSelected) ? 1.75 : 1.25
     ctx.stroke()
 
-    ctx.shadowBlur = 0
-
-    // Spinning ring
+    // Quiet activity ring while running (static under reduced motion)
     if (isRunning) {
+      const spin = PREFERS_REDUCED_MOTION ? -Math.PI / 2 : time * TOOL_DRAW.spinSpeed
       ctx.beginPath()
-      ctx.arc(tool.x, tool.y, Math.max(cardW, cardH) / 2 + TOOL_DRAW.spinRingPadding, time * TOOL_DRAW.spinSpeed, time * TOOL_DRAW.spinSpeed + TOOL_DRAW.spinArc)
-      ctx.strokeStyle = COLORS.tool + '50'
+      ctx.arc(tool.x, tool.y, Math.max(cardW, cardH) / 2 + TOOL_DRAW.spinRingPadding, spin, spin + TOOL_DRAW.spinArc)
+      ctx.strokeStyle = COLORS.tool + '80'
       ctx.lineWidth = 1.5
+      ctx.lineCap = 'round'
       ctx.stroke()
-    }
-
-    // Crack lines for errors
-    if (isError) {
-      ctx.save()
-      ctx.strokeStyle = COLORS.error + '40'
-      ctx.lineWidth = 0.8
-      for (let i = 0; i < 3; i++) {
-        const a = (i / 3) * Math.PI * 2 + 0.5
-        ctx.beginPath()
-        ctx.moveTo(tool.x, tool.y)
-        ctx.lineTo(tool.x + Math.cos(a) * cardW * 0.5, tool.y + Math.sin(a) * cardH * 0.6)
-        ctx.stroke()
-      }
-      ctx.restore()
+      ctx.lineCap = 'butt'
     }
 
     const truncatedLabel = truncateText(ctx, toolLabel, cardW - 8)

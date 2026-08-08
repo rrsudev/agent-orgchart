@@ -245,11 +245,12 @@ export const BEAM = {
   cp1: 0.33,
   cp2: 0.66,
   segments: 16,
-  parentChild: { startW: 3, endW: 1 },
-  tool: { startW: 1.5, endW: 0.5 },
-  glowExtra: { startW: 3, endW: 1, alpha: 0.08 },
-  idleAlpha: 0.08,
-  activeAlpha: 0.3,
+  // Thin, quiet connectors — near-uniform hairlines, no energetic taper/glow.
+  parentChild: { startW: 1.5, endW: 1.25 },
+  tool: { startW: 1.1, endW: 0.9 },
+  glowExtra: { startW: 0, endW: 0, alpha: 0 },
+  idleAlpha: 0.16,
+  activeAlpha: 0.42,
   wobble: { amp: 3, freq: 10, timeFreq: 3, trailOffset: 0.15 },
 } as const
 
@@ -267,7 +268,7 @@ export const TETHER = {
 export const POPUP = {
   tool: { width: 320, estimatedHeight: 200 },
   discovery: { width: 300, estimatedHeight: 160 },
-  controlBarMaxWidth: 680,
+  controlBarMaxWidth: 820,
 } as const
 
 // Default empty context breakdown

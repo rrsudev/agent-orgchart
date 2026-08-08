@@ -1,6 +1,5 @@
 import { COLORS } from '@/lib/colors'
-import { SPAWN_FX, COMPLETE_FX } from '@/lib/canvas-constants'
-import { drawHexagon } from './draw-misc'
+import { SPAWN_FX, COMPLETE_FX, PREFERS_REDUCED_MOTION } from '@/lib/canvas-constants'
 import { alphaHex } from '@/lib/utils'
 
 export interface VisualEffect {
@@ -33,11 +32,12 @@ export function drawEffects(ctx: CanvasRenderingContext2D, effects: VisualEffect
           ctx.fill()
         }
 
-        // Expanding hexagonal ring
+        // Gentle expanding ring (circular, matches the calm form)
         ctx.globalAlpha = alpha
-        drawHexagon(ctx, fx.x, fx.y, ringRadius)
+        ctx.beginPath()
+        ctx.arc(fx.x, fx.y, ringRadius, 0, Math.PI * 2)
         ctx.strokeStyle = fx.color
-        ctx.lineWidth = 2 * (1 - progress)
+        ctx.lineWidth = 1.5 * (1 - progress)
         ctx.stroke()
 
         // Scatter particles outward
@@ -90,10 +90,9 @@ export function drawEffects(ctx: CanvasRenderingContext2D, effects: VisualEffect
       }
 
       case 'shatter': {
-        // Particles scatter outward from tool card
-        if (!fx.particles) break
-        const alpha = (1 - progress) * 0.8
-        ctx.globalAlpha = alpha
+        // Quiet dissolve — no burst/glow, and skipped entirely under reduced motion.
+        if (!fx.particles || PREFERS_REDUCED_MOTION) break
+        ctx.globalAlpha = (1 - progress) * 0.35
 
         for (const p of fx.particles) {
           const dist = p.speed * fx.age
@@ -104,15 +103,6 @@ export function drawEffects(ctx: CanvasRenderingContext2D, effects: VisualEffect
           ctx.beginPath()
           ctx.fillStyle = fx.color
           ctx.arc(px, py, size, 0, Math.PI * 2)
-          ctx.fill()
-
-          // Tiny glow on each particle
-          ctx.beginPath()
-          const glow = ctx.createRadialGradient(px, py, 0, px, py, size * 3)
-          glow.addColorStop(0, fx.color + '40')
-          glow.addColorStop(1, fx.color + '00')
-          ctx.fillStyle = glow
-          ctx.arc(px, py, size * 3, 0, Math.PI * 2)
           ctx.fill()
         }
         break

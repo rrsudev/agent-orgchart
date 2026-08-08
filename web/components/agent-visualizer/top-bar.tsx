@@ -12,7 +12,7 @@ import type { SessionInfo, ConnectionStatus } from "@/lib/bridge-types"
 
 function MutedIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
       <line x1="23" y1="9" x2="17" y2="15" />
       <line x1="17" y1="9" x2="23" y2="15" />
@@ -22,7 +22,7 @@ function MutedIcon() {
 
 function UnmutedIcon() {
   return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
       <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
       <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
@@ -42,7 +42,7 @@ function ToggleButton({ active, onClick, children, style, activeColor }: {
   return (
     <button
       onClick={onClick}
-      className="px-1.5 py-0.5 rounded transition-all"
+      className="px-2.5 py-1 rounded transition-all"
       style={{
         background: active ? (activeColor?.bg ?? COLORS.toggleActive) : COLORS.toggleInactive,
         border: `1px solid ${COLORS.toggleBorder}`,
@@ -66,8 +66,8 @@ function ConnectionIndicator({ status }: { status: ConnectionStatus }) {
   return (
     <span className="flex items-center gap-1.5">
       <span
-        className="w-1.5 h-1.5 rounded-full"
-        style={{ background: color, boxShadow: `0 0 4px ${color}` }}
+        className="w-2 h-2 rounded-full"
+        style={{ background: color, boxShadow: `0 0 6px ${color}` }}
       />
       {label}
     </span>
@@ -109,7 +109,7 @@ export const TopBar = memo(function TopBar({
   onTogglePanel, onToggleTimeline, onToggleMute,
 }: TopBarProps) {
   return (
-    <div className="absolute top-3 left-3 right-3 flex items-center gap-4 font-mono text-[10px]" style={{ zIndex: Z.info }}>
+    <div className="absolute top-4 left-4 right-4 flex items-center gap-5 font-mono text-xs" style={{ zIndex: Z.info }}>
       {/* Session tabs — scrollable, takes available space */}
       {sessions.length > 1 && (
         <div className="min-w-0 flex-shrink overflow-x-auto scrollbar-hide">
@@ -127,7 +127,7 @@ export const TopBar = memo(function TopBar({
       <div className="flex-1" />
 
       {/* Right-side info/controls */}
-      <div className="flex items-center gap-4 flex-shrink-0" style={{ color: COLORS.textMuted }}>
+      <div className="flex items-center gap-5 flex-shrink-0" style={{ color: COLORS.textMuted }}>
         {isVSCode && <ConnectionIndicator status={connectionStatus} />}
         <span>{agentCount} agents</span>
         <span>
@@ -138,7 +138,7 @@ export const TopBar = memo(function TopBar({
         </span>
 
         {/* Mutually exclusive panel group */}
-        <div className="flex items-center gap-1 px-1 py-0.5 rounded" style={{
+        <div className="flex items-center gap-1.5 px-1.5 py-1 rounded" style={{
           background: COLORS.holoBg03,
           border: `1px solid ${COLORS.holoBorder06}`,
         }}>

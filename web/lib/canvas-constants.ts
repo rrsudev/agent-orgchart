@@ -49,6 +49,54 @@ export const SOUND_PREF_KEY = 'agent-viz-sound'
 
 export const MOCK_END_BUFFER_S = 8
 
+// ─── Canvas typography ───────────────────────────────────────────────────────
+// System fonts are always present, so these resolve immediately (no font-load
+// timing issue). Use `sans` for names/labels/prose so type carries hierarchy
+// through weight+size; reserve `mono` for genuinely tabular metrics
+// (token counts, costs, percentages).
+export const CANVAS_FONT = {
+  sans: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif",
+  mono: "'SF Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+} as const
+
+// ─── Reduced motion ──────────────────────────────────────────────────────────
+/** OS "reduce motion" preference — freezes non-essential canvas motion
+ *  (parallax drift, breathing, scanline, orbits, ripples, spawn bursts).
+ *  Evaluated once at load; guarded for SSR + webview/standalone builds. */
+export const PREFERS_REDUCED_MOTION =
+  typeof window !== 'undefined' &&
+  typeof window.matchMedia === 'function' &&
+  window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+// ─── Node (agent) form ───────────────────────────────────────────────────────
+// Apple squircle: flat white card, continuous rounded corners, a single hairline
+// border (state color) and one soft elevation shadow — no glow/scanline/HUD.
+export const NODE_DRAW = {
+  /** Squircle half-size as a fraction of the node radius (inscribed in the
+   *  circular hit-test so hit-testing stays aligned). */
+  halfScale: 0.86,
+  /** Continuous-corner radius as a fraction of the half-size. */
+  cornerScale: 0.42,
+  borderWidth: 1.25,
+  borderWidthEmphasis: 2,
+  /** Soft single-elevation shadow. */
+  shadowColor: 'rgba(0, 0, 0, 0.1)',
+  shadowColorEmphasis: 'rgba(0, 0, 0, 0.16)',
+  shadowBlur: 10,
+  shadowBlurEmphasis: 16,
+  shadowOffsetY: 2,
+  /** Brand identity glyph scale (relative to radius). */
+  brandScale: 0.62,
+  /** State badge (top-right) radius as a fraction of node radius + icon scale. */
+  badgeScale: 0.42,
+  badgeIconScale: 0.5,
+  badgeOffsetScale: 0.62,
+  /** Color cross-fade speed (units per second) on state change. */
+  colorLerpSpeed: 6,
+  /** Gentle appear scale-up start. */
+  appearScaleFrom: 0.92,
+} as const
+
 // ─── Canvas drawing constants ────────────────────────────────────────────────
 
 /** Seconds a message bubble stays fully visible */
@@ -284,7 +332,7 @@ export const STATS_OVERLAY = {
 
 export const TOOL_DRAW = {
   fontSize: 8,
-  borderRadius: 4,
+  borderRadius: 8,
   /** Extra height for completed/error cards showing token cost */
   expandedHeight: 30,
   collapsedHeight: 24,
@@ -340,8 +388,8 @@ export const COST_PANEL = {
 // ─── Bubble drawing constants ───────────────────────────────────────────────
 
 export const BUBBLE_DRAW = {
-  thinking: { fontSize: 5.5, labelSize: 5, lineH: 7.5, padding: 5, headerH: 10 },
-  normal: { fontSize: 7, labelSize: 6, lineH: 10, padding: 6, headerH: 12 },
+  thinking: { fontSize: 9, labelSize: 8, lineH: 12.5, padding: 7, headerH: 15 },
+  normal: { fontSize: 10, labelSize: 8.5, lineH: 14, padding: 8, headerH: 16 },
   /** Triangle pointer offsets */
   triOffset: 4,
   triWidth: 5,
@@ -353,24 +401,26 @@ export const BUBBLE_DRAW = {
 
 export const SPAWN_FX = {
   ringStart: 10,
-  ringExpand: 60,
-  maxAlpha: 0.7,
-  flashThreshold: 0.3,
-  flashAlpha: 0.6,
+  ringExpand: 48,
+  // Calm Apple appear: a single soft expanding ring, no flash, no particle burst.
+  maxAlpha: 0.28,
+  flashThreshold: 0,
+  flashAlpha: 0,
   flashBaseRadius: 20,
   flashMinRadius: 5,
-  particleCount: 8,
+  particleCount: 0,
   particleSize: 1.5,
 } as const
 
 export const COMPLETE_FX = {
   ringStart: 20,
-  ringExpand: 80,
-  maxAlpha: 0.6,
-  flashThreshold: 0.2,
-  flashAlpha: 0.8,
+  ringExpand: 64,
+  // Gentle single ring, no bright flash.
+  maxAlpha: 0.28,
+  flashThreshold: 0,
+  flashAlpha: 0,
   flashRadius: 30,
-  lineWidthMax: 3,
+  lineWidthMax: 2,
   glowInner: 3,
   glowOuter: 6,
 } as const

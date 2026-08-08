@@ -64,6 +64,12 @@ export function drawHexagon(ctx: CanvasRenderingContext2D, x: number, y: number,
   ctx.closePath()
 }
 
+/** Draw a centered squircle (continuous-corner rounded square) path. */
+export function drawSquircle(ctx: CanvasRenderingContext2D, cx: number, cy: number, half: number, radius: number) {
+  ctx.beginPath()
+  ctx.roundRect(cx - half, cy - half, half * 2, half * 2, radius)
+}
+
 /** Claude spark viewBox size (origin at center via sparkViewBox offset in AGENT_DRAW). */
 export const CLAUDE_SPARK_VIEWBOX = 256
 

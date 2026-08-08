@@ -1,11 +1,10 @@
-import { Agent, NODE, ANIM } from '@/lib/agent-types'
+import { Agent, NODE, ANIM, AgentState } from '@/lib/agent-types'
 import { COLORS, getStateColor, contextSegments } from '@/lib/colors'
 import {
-  AGENT_DRAW, CONTEXT_BAR, CONTEXT_RING, STATS_OVERLAY,
+  AGENT_DRAW, CONTEXT_BAR, CONTEXT_RING, STATS_OVERLAY, NODE_DRAW, CANVAS_FONT, PREFERS_REDUCED_MOTION,
 } from '@/lib/canvas-constants'
-import { alphaHex, formatTokens } from '@/lib/utils'
-import { truncateText, drawHexagon, CLAUDE_SPARK_D, OPENAI_LOGO_D, OPENAI_LOGO_VIEWBOX } from './draw-misc'
-import { getAgentGlowSprite } from './render-cache'
+import { formatTokens } from '@/lib/utils'
+import { truncateText, drawSquircle, CLAUDE_SPARK_D, OPENAI_LOGO_D, OPENAI_LOGO_VIEWBOX } from './draw-misc'
 
 let _claudeSparkPath: Path2D | null = null
 export function getClaudeSparkPath() {
@@ -26,8 +25,6 @@ export function drawClaudeSpark(ctx: CanvasRenderingContext2D, cx: number, cy: n
   ctx.scale(scale, scale)
   ctx.translate(-AGENT_DRAW.sparkViewBox, -AGENT_DRAW.sparkViewBox + 1)
   ctx.fillStyle = color
-  ctx.shadowColor = color
-  ctx.shadowBlur = 6 / scale
   ctx.fill(getClaudeSparkPath())
   ctx.restore()
 }
@@ -40,8 +37,6 @@ export function drawOpenAILogo(ctx: CanvasRenderingContext2D, cx: number, cy: nu
   ctx.scale(scale, scale)
   ctx.translate(-OPENAI_LOGO_VIEWBOX / 2, -OPENAI_LOGO_VIEWBOX / 2)
   ctx.fillStyle = color
-  ctx.shadowColor = color
-  ctx.shadowBlur = 6 / scale
   ctx.fill(getOpenAILogoPath())
   ctx.restore()
 }
@@ -76,9 +71,9 @@ export function drawContextComposition(
   ctx.roundRect(barX - 2, barY - 2, barWidth + 4, barHeight + 14, CONTEXT_BAR.borderRadius)
   ctx.fill()
 
-  // Label
+  // Label — tabular metric, keep monospace
   ctx.fillStyle = COLORS.textMuted
-  ctx.font = `${CONTEXT_BAR.fontSize}px monospace`
+  ctx.font = `${CONTEXT_BAR.fontSize}px ${CANVAS_FONT.mono}`
   ctx.textAlign = 'center'
   ctx.fillText(`${formatTokens(total)} / ${formatTokens(agent.tokensMax)} tokens`, agent.x, barY + barHeight + CONTEXT_BAR.labelPadding)
 
@@ -144,28 +139,25 @@ export function drawContextRing(
     currentAngle += sweep
   }
 
-  // Warning glow at high usage
+  // Subtle warning at high usage (no luminance glow — a slightly heavier ring)
   if (usage > CONTEXT_RING.warningThreshold) {
     const warningColor = usage > CONTEXT_RING.criticalThreshold ? COLORS.error : COLORS.tool
-    const intensity = usage > CONTEXT_RING.criticalThreshold
-      ? 0.35 + Math.sin(time * 6) * 0.2
-      : 0.15 + Math.sin(time * 3) * 0.1
+    const pulse = PREFERS_REDUCED_MOTION ? 0 : Math.sin(time * (usage > CONTEXT_RING.criticalThreshold ? 6 : 3))
+    const intensity = (usage > CONTEXT_RING.criticalThreshold ? 0.4 : 0.22) + pulse * 0.1
 
     ctx.save()
     ctx.beginPath()
     ctx.arc(agent.x, agent.y, ringR + CONTEXT_RING.glowPadding, 0, Math.PI * 2)
     ctx.strokeStyle = warningColor
     ctx.lineWidth = CONTEXT_RING.glowLineWidth
-    ctx.globalAlpha = intensity
-    ctx.shadowColor = warningColor
-    ctx.shadowBlur = CONTEXT_RING.glowBlur
+    ctx.globalAlpha = Math.max(0, intensity)
     ctx.stroke()
     ctx.restore()
   }
 
-  // Percentage label when usage is high
+  // Percentage label when usage is high — tabular, monospace
   if (usage > CONTEXT_RING.percentLabelThreshold) {
-    ctx.font = `${CONTEXT_BAR.fontSize}px monospace`
+    ctx.font = `${CONTEXT_BAR.fontSize}px ${CANVAS_FONT.mono}`
     ctx.textAlign = 'center'
     ctx.textBaseline = 'bottom'
     ctx.fillStyle = usage > CONTEXT_RING.criticalThreshold ? COLORS.error : usage > CONTEXT_RING.warningThreshold ? COLORS.tool : COLORS.textDim
@@ -173,152 +165,176 @@ export function drawContextRing(
   }
 }
 
-function drawDepthShadow(ctx: CanvasRenderingContext2D, agent: Agent, r: number) {
+// ─── State color cross-fade ──────────────────────────────────────────────────
+// State changes cross-fade smoothly rather than snapping. Held in a module map
+// (not on the Agent type) so the data schema is untouched. Result stays 6-digit
+// hex so the `color + 'xx'` concat contract elsewhere still holds.
+const agentColorRgb = new Map<string, [number, number, number]>()
+let lastColorTime = 0
+
+function hexToRgb(hex: string): [number, number, number] {
+  const n = parseInt(hex.slice(1), 16)
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+}
+function rgbToHex(r: number, g: number, b: number): string {
+  return '#' + [r, g, b].map(v => Math.round(v).toString(16).padStart(2, '0')).join('')
+}
+function getAgentColor(id: string, target: string, dt: number): string {
+  const [tr, tg, tb] = hexToRgb(target)
+  const cur = agentColorRgb.get(id)
+  if (!cur || PREFERS_REDUCED_MOTION) {
+    agentColorRgb.set(id, [tr, tg, tb])
+    return target
+  }
+  const t = Math.min(1, dt * NODE_DRAW.colorLerpSpeed)
+  const next: [number, number, number] = [
+    cur[0] + (tr - cur[0]) * t,
+    cur[1] + (tg - cur[1]) * t,
+    cur[2] + (tb - cur[2]) * t,
+  ]
+  agentColorRgb.set(id, next)
+  return rgbToHex(next[0], next[1], next[2])
+}
+
+// ─── Node form: flat squircle card + state badge ─────────────────────────────
+
+function drawNodeCard(
+  ctx: CanvasRenderingContext2D,
+  agent: Agent, half: number, color: string,
+  isHovered: boolean, isSelected: boolean, isWaiting: boolean, time: number,
+) {
+  const emphasis = isHovered || isSelected
+  const radius = half * NODE_DRAW.cornerScale
+
+  // Single soft elevation shadow behind a solid white card.
   ctx.save()
-  ctx.shadowColor = 'rgba(0, 0, 0, 0.12)'
-  ctx.shadowBlur = AGENT_DRAW.shadowBlur
-  ctx.shadowOffsetX = AGENT_DRAW.shadowOffsetX
-  ctx.shadowOffsetY = AGENT_DRAW.shadowOffsetY
-  drawHexagon(ctx, agent.x, agent.y, r * 0.9)
-  ctx.fillStyle = COLORS.cardBgFaintOverlay
+  ctx.shadowColor = emphasis ? NODE_DRAW.shadowColorEmphasis : NODE_DRAW.shadowColor
+  ctx.shadowBlur = emphasis ? NODE_DRAW.shadowBlurEmphasis : NODE_DRAW.shadowBlur
+  ctx.shadowOffsetY = NODE_DRAW.shadowOffsetY
+  drawSquircle(ctx, agent.x, agent.y, half, radius)
+  ctx.fillStyle = '#ffffff'
   ctx.fill()
   ctx.restore()
-}
 
-function drawAgentGlow(ctx: CanvasRenderingContext2D, agent: Agent, r: number, color: string, isHovered: boolean, isSelected: boolean, isWaiting: boolean) {
-  const glowR = r + AGENT_DRAW.glowPadding
-  // Softer halos on light — a subtle colored shadow, never a luminance bloom.
-  const glowAlpha = isHovered || isSelected ? 0.18 : isWaiting ? 0.16 : agent.state === 'thinking' ? 0.12 : 0.06
-  // Pre-rendered glow sprite instead of per-frame gradient creation
-  const sprite = getAgentGlowSprite(color, Math.round(r * 0.5), Math.ceil(glowR), alphaHex(glowAlpha))
-  ctx.drawImage(sprite, agent.x - Math.ceil(glowR), agent.y - Math.ceil(glowR))
-
-  // Ambient outer hex ring
-  drawHexagon(ctx, agent.x, agent.y, r + AGENT_DRAW.outerRingOffset)
-  ctx.strokeStyle = color + '25'
-  ctx.lineWidth = 1
-  ctx.stroke()
-
-  // Inner hex fill
-  drawHexagon(ctx, agent.x, agent.y, r)
-  ctx.fillStyle = COLORS.nodeInterior
-  ctx.fill()
-}
-
-function drawScanline(ctx: CanvasRenderingContext2D, agent: Agent, r: number, color: string, isHovered: boolean, isWaiting: boolean, time: number) {
-  const scanSpeed = agent.state === 'thinking' || isHovered || isWaiting ? ANIM.scanline.thinking : ANIM.scanline.normal
-  const scanY = agent.y - r + ((time * scanSpeed) % (r * 2))
-  ctx.save()
-  drawHexagon(ctx, agent.x, agent.y, r)
-  ctx.clip()
-  const scanGrad = ctx.createLinearGradient(agent.x, scanY - AGENT_DRAW.scanlineHalfH, agent.x, scanY + AGENT_DRAW.scanlineHalfH)
-  const scanAlpha = isHovered ? '35' : '20'
-  scanGrad.addColorStop(0, color + '00')
-  scanGrad.addColorStop(0.5, color + scanAlpha)
-  scanGrad.addColorStop(1, color + '00')
-  ctx.fillStyle = scanGrad
-  ctx.fillRect(agent.x - r, scanY - AGENT_DRAW.scanlineHalfH, r * 2, AGENT_DRAW.scanlineWidth)
-  ctx.restore()
-}
-
-function drawStateRing(ctx: CanvasRenderingContext2D, agent: Agent, r: number, color: string, isHovered: boolean, isSelected: boolean, isWaiting: boolean, time: number) {
-  drawHexagon(ctx, agent.x, agent.y, r)
+  // Hairline border in the (cross-fading) state color. Shape also carries
+  // meaning: complete = dashed, waiting = animated dashed, error = heavier.
+  drawSquircle(ctx, agent.x, agent.y, half, radius)
   ctx.strokeStyle = color
-  ctx.lineWidth = (isSelected || isHovered) ? 2.5 : 2
+  ctx.lineWidth = (agent.state === 'error' || emphasis) ? NODE_DRAW.borderWidthEmphasis : NODE_DRAW.borderWidth
   if (agent.state === 'complete') {
-    ctx.setLineDash([4, 4])
-    ctx.strokeStyle = color + '60'
+    ctx.setLineDash([5, 4])
   } else if (isWaiting) {
     ctx.setLineDash([6, 4])
-    ctx.lineDashOffset = -time * AGENT_DRAW.waitingDashSpeed
-    ctx.lineWidth = 2.5
+    ctx.lineDashOffset = PREFERS_REDUCED_MOTION ? 0 : -time * AGENT_DRAW.waitingDashSpeed
   }
   ctx.stroke()
   ctx.setLineDash([])
   ctx.lineDashOffset = 0
 }
 
-function drawCenterIcon(ctx: CanvasRenderingContext2D, agent: Agent, r: number, color: string, isWaiting: boolean) {
-  if (isWaiting) {
-    // Geometric lock icon — fits the holographic style
-    const s = r * 0.3
-    ctx.save()
-    ctx.strokeStyle = color + '90'
-    ctx.fillStyle = color + '90'
-    ctx.lineWidth = 1.5
-    // Lock body (rounded rect)
-    ctx.beginPath()
-    ctx.roundRect(agent.x - s * 0.6, agent.y - s * 0.1, s * 1.2, s * 1.0, 2)
-    ctx.fill()
-    // Lock shackle (arc)
-    ctx.beginPath()
-    ctx.arc(agent.x, agent.y - s * 0.15, s * 0.4, Math.PI, 0)
-    ctx.stroke()
-    ctx.restore()
-  } else if (agent.isMain) {
-    drawAgentBrand(ctx, agent.x, agent.y, r, color + '90', agent.runtime)
-  } else {
-    ctx.fillStyle = color + '90'
-    ctx.font = `${r * AGENT_DRAW.subIconScale}px monospace`
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-    ctx.fillText(agent.state === 'tool_calling' ? '\u2699' : '\u25C7', agent.x, agent.y)
+/** Uniform, SF-Symbols-style white line glyph encoding the state (so state is
+ *  never conveyed by color alone). */
+function drawStateGlyph(ctx: CanvasRenderingContext2D, cx: number, cy: number, s: number, state: AgentState, time: number) {
+  ctx.save()
+  ctx.strokeStyle = '#ffffff'
+  ctx.fillStyle = '#ffffff'
+  ctx.lineWidth = Math.max(1, s * 0.34)
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+  switch (state) {
+    case 'complete': {
+      ctx.beginPath()
+      ctx.moveTo(cx - s * 0.55, cy + s * 0.02)
+      ctx.lineTo(cx - s * 0.1, cy + s * 0.45)
+      ctx.lineTo(cx + s * 0.6, cy - s * 0.45)
+      ctx.stroke()
+      break
+    }
+    case 'error': {
+      ctx.beginPath()
+      ctx.moveTo(cx, cy - s * 0.6)
+      ctx.lineTo(cx, cy + s * 0.15)
+      ctx.stroke()
+      ctx.beginPath()
+      ctx.arc(cx, cy + s * 0.55, Math.max(0.8, s * 0.16), 0, Math.PI * 2)
+      ctx.fill()
+      break
+    }
+    case 'waiting_permission': {
+      // Lock: rounded body + shackle arc
+      ctx.beginPath()
+      ctx.roundRect(cx - s * 0.5, cy - s * 0.05, s, s * 0.68, s * 0.16)
+      ctx.stroke()
+      ctx.beginPath()
+      ctx.arc(cx, cy - s * 0.05, s * 0.32, Math.PI, 0)
+      ctx.stroke()
+      break
+    }
+    case 'tool_calling': {
+      // Activity spinner — 3/4 arc, rotates unless reduced motion
+      const a = PREFERS_REDUCED_MOTION ? -Math.PI / 2 : time * 3
+      ctx.beginPath()
+      ctx.arc(cx, cy, s * 0.62, a, a + Math.PI * 1.5)
+      ctx.stroke()
+      break
+    }
+    case 'thinking': {
+      for (let i = -1; i <= 1; i++) {
+        ctx.beginPath()
+        ctx.arc(cx + i * s * 0.5, cy, Math.max(0.8, s * 0.16), 0, Math.PI * 2)
+        ctx.fill()
+      }
+      break
+    }
+    case 'paused': {
+      ctx.fillRect(cx - s * 0.45, cy - s * 0.5, s * 0.3, s)
+      ctx.fillRect(cx + s * 0.15, cy - s * 0.5, s * 0.3, s)
+      break
+    }
+    default: { // idle — ready dot
+      ctx.beginPath()
+      ctx.arc(cx, cy, s * 0.34, 0, Math.PI * 2)
+      ctx.fill()
+    }
   }
+  ctx.restore()
 }
 
-function drawOrbitingParticles(ctx: CanvasRenderingContext2D, agent: Agent, r: number, color: string, time: number) {
-  for (let i = 0; i < 4; i++) {
-    const angle = time * ANIM.orbitSpeed + (i / 4) * Math.PI * 2
-    ctx.beginPath()
-    ctx.fillStyle = color + '80'
-    ctx.arc(
-      agent.x + Math.cos(angle) * (r + AGENT_DRAW.orbitParticleOffset),
-      agent.y + Math.sin(angle) * (r + AGENT_DRAW.orbitParticleOffset),
-      AGENT_DRAW.orbitParticleSize, 0, Math.PI * 2,
-    )
-    ctx.fill()
-  }
+function drawStateBadge(
+  ctx: CanvasRenderingContext2D,
+  agent: Agent, radius: number, half: number, color: string, time: number,
+) {
+  const br = radius * NODE_DRAW.badgeScale
+  const bx = agent.x + half * 0.72
+  const by = agent.y - half * 0.72
+
+  // White separator ring so the badge reads cleanly against the card/scene.
+  ctx.beginPath()
+  ctx.arc(bx, by, br + 1.5, 0, Math.PI * 2)
+  ctx.fillStyle = '#ffffff'
+  ctx.fill()
+
+  ctx.beginPath()
+  ctx.arc(bx, by, br, 0, Math.PI * 2)
+  ctx.fillStyle = color
+  ctx.fill()
+
+  drawStateGlyph(ctx, bx, by, br * 0.55, agent.state, time)
 }
 
-function drawWaitingRipples(ctx: CanvasRenderingContext2D, agent: Agent, r: number, color: string, time: number) {
-  // Radar ripples — 2 concentric rings expanding outward, staggered
-  for (let i = 0; i < 2; i++) {
-    const ripplePhase = ((time * 0.65 + i * 0.5) % 1.0)
-    const rippleR = r + AGENT_DRAW.rippleInnerOffset + ripplePhase * AGENT_DRAW.rippleMaxExpand
-    const rippleAlpha = (1 - ripplePhase) * AGENT_DRAW.rippleMaxAlpha
-    ctx.beginPath()
-    drawHexagon(ctx, agent.x, agent.y, rippleR)
-    ctx.strokeStyle = color + alphaHex(rippleAlpha)
-    ctx.lineWidth = 1.5 * (1 - ripplePhase)
-    ctx.stroke()
-  }
-
-  // Slower orbiting particles in amber
-  for (let i = 0; i < 3; i++) {
-    const angle = time * AGENT_DRAW.waitingOrbitSpeed + (i / 3) * Math.PI * 2
-    ctx.beginPath()
-    ctx.fillStyle = color + '70'
-    ctx.arc(
-      agent.x + Math.cos(angle) * (r + AGENT_DRAW.waitingOrbitOffset),
-      agent.y + Math.sin(angle) * (r + AGENT_DRAW.waitingOrbitOffset),
-      AGENT_DRAW.waitingOrbitParticleSize, 0, Math.PI * 2,
-    )
-    ctx.fill()
-  }
-}
-
-function drawAgentLabel(ctx: CanvasRenderingContext2D, agent: Agent, r: number, isHovered: boolean) {
+function drawAgentLabel(ctx: CanvasRenderingContext2D, agent: Agent, half: number, isHovered: boolean) {
   ctx.fillStyle = isHovered ? COLORS.textPrimary : COLORS.textDim
-  ctx.font = '10px monospace'
+  // Type carries hierarchy through weight + size, on the system stack.
+  ctx.font = `600 12px ${CANVAS_FONT.sans}`
   ctx.textAlign = 'center'
   ctx.textBaseline = 'top'
-  const maxLabelW = r * AGENT_DRAW.labelWidthMultiplier
+  const maxLabelW = half * 3
   const agentLabel = truncateText(ctx, agent.name, maxLabelW)
-  ctx.fillText(agentLabel, agent.x, agent.y + r + AGENT_DRAW.labelYOffset)
+  ctx.fillText(agentLabel, agent.x, agent.y + half + AGENT_DRAW.labelYOffset)
 }
 
-function drawStatsOverlay(ctx: CanvasRenderingContext2D, agent: Agent, r: number) {
-  const sy = agent.y - r - STATS_OVERLAY.yOffset
+function drawStatsOverlay(ctx: CanvasRenderingContext2D, agent: Agent, radius: number) {
+  const sy = agent.y - radius - STATS_OVERLAY.yOffset
   ctx.fillStyle = COLORS.cardBgDark
   ctx.beginPath()
   ctx.roundRect(agent.x - STATS_OVERLAY.boxWidth / 2, sy, STATS_OVERLAY.boxWidth, STATS_OVERLAY.boxHeight, STATS_OVERLAY.borderRadius)
@@ -327,10 +343,10 @@ function drawStatsOverlay(ctx: CanvasRenderingContext2D, agent: Agent, r: number
   ctx.lineWidth = 0.5
   ctx.stroke()
   ctx.fillStyle = COLORS.textMuted
-  ctx.font = `${STATS_OVERLAY.fontSize}px monospace`
+  ctx.font = `${STATS_OVERLAY.fontSize}px ${CANVAS_FONT.mono}`
   ctx.textAlign = 'center'
   ctx.textBaseline = 'top'
-  ctx.fillText(`${agent.toolCalls} tools \u00B7 ${agent.timeAlive.toFixed(1)}s`, agent.x, sy + STATS_OVERLAY.textPaddingY)
+  ctx.fillText(`${agent.toolCalls} tools · ${agent.timeAlive.toFixed(1)}s`, agent.x, sy + STATS_OVERLAY.textPaddingY)
 }
 
 export function drawAgents(
@@ -341,51 +357,45 @@ export function drawAgents(
   showStats: boolean,
   time: number,
 ) {
+  const dt = Math.min(0.1, Math.max(0, time - lastColorTime))
+  lastColorTime = time
+
   for (const [id, agent] of agents) {
     const radius = agent.isMain ? NODE.radiusMain : NODE.radiusSub
-    const color = getStateColor(agent.state)
+    const color = getAgentColor(id, getStateColor(agent.state), dt)
     const isHovered = id === hoveredAgentId
     const isSelected = id === selectedAgentId
-
     const isWaiting = agent.state === 'waiting_permission'
 
-    const breathe = isWaiting
+    // Subtle breathing only (no HUD scanlines/orbits/ripples); off under reduced motion.
+    const breathe = PREFERS_REDUCED_MOTION
+      ? 1
+      : isWaiting
       ? Math.sin(time * AGENT_DRAW.waitingBreatheSpeed) * AGENT_DRAW.waitingBreatheAmp + 1
       : agent.state === 'thinking'
       ? Math.sin(time * ANIM.breathe.thinkingSpeed) * ANIM.breathe.thinkingAmp + 1
       : agent.state === 'idle' ? Math.sin(time * ANIM.breathe.idleSpeed) * ANIM.breathe.idleAmp + 1 : 1
 
-    const r = radius * breathe * agent.scale
+    const half = radius * NODE_DRAW.halfScale * breathe * agent.scale
 
     ctx.save()
     ctx.globalAlpha = agent.opacity
 
-    drawDepthShadow(ctx, agent, r)
-    drawAgentGlow(ctx, agent, r, color, isHovered, isSelected, isWaiting)
-    drawScanline(ctx, agent, r, color, isHovered, isWaiting, time)
-    drawStateRing(ctx, agent, r, color, isHovered, isSelected, isWaiting, time)
-    drawCenterIcon(ctx, agent, r, color, isWaiting)
+    drawNodeCard(ctx, agent, half, color, isHovered, isSelected, isWaiting, time)
+    drawAgentBrand(ctx, agent.x, agent.y, half * 2.2, COLORS.textPrimary, agent.runtime)
+    drawStateBadge(ctx, agent, radius, half, color, time)
+    drawAgentLabel(ctx, agent, half, isHovered)
 
-    if (agent.state === 'thinking') {
-      drawOrbitingParticles(ctx, agent, r, color, time)
-    }
-
-    if (isWaiting) {
-      drawWaitingRipples(ctx, agent, r, color, time)
-    }
-
-    drawAgentLabel(ctx, agent, r, isHovered)
-
-    // Context composition — ring for main agent, bar for sub-agents
+    // Context composition — ring for main agent, bar for all
     if (agent.state !== 'complete' || agent.opacity > 0.5) {
       if (agent.isMain) {
-        drawContextRing(ctx, agent, r, time)
+        drawContextRing(ctx, agent, radius, time)
       }
-      drawContextComposition(ctx, agent, r)
+      drawContextComposition(ctx, agent, radius)
     }
 
     if (showStats && agent.state !== 'complete') {
-      drawStatsOverlay(ctx, agent, r)
+      drawStatsOverlay(ctx, agent, radius)
     }
 
     ctx.restore()

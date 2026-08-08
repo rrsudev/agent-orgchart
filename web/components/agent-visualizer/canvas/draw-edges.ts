@@ -128,15 +128,15 @@ export function drawEdges(
 
     ctx.save()
 
-    // Tapered beam: wider at source, thin at destination
-    drawTaperedBezier(ctx, fromX, fromY, cp1x, cp1y, cp2x, cp2y, toX, toY,
-      bw.startW, bw.endW, beamColor, baseAlpha * pulsing)
-
-    // Active glow beam (wider, dimmer)
-    if (hasActiveParticles) {
-      drawTaperedBezier(ctx, fromX, fromY, cp1x, cp1y, cp2x, cp2y, toX, toY,
-        bw.startW + BEAM.glowExtra.startW, bw.endW + BEAM.glowExtra.endW, beamColor, BEAM.glowExtra.alpha)
-    }
+    // Quiet hairline connector — a single thin stroked curve. Slightly darker
+    // and marginally thicker while a particle is in flight; no glow, no taper.
+    ctx.beginPath()
+    ctx.moveTo(fromX, fromY)
+    ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, toX, toY)
+    ctx.strokeStyle = beamColor + alphaHex(Math.min(1, baseAlpha * pulsing))
+    ctx.lineWidth = hasActiveParticles ? bw.startW : (bw.startW + bw.endW) / 2
+    ctx.lineCap = 'round'
+    ctx.stroke()
 
     ctx.restore()
   }

@@ -110,24 +110,24 @@ function LiveControlBar({
       className="absolute bottom-4 left-4 right-4 mx-auto"
       style={{ pointerEvents: 'auto', maxWidth: POPUP.controlBarMaxWidth, zIndex: Z.controlBar }}
     >
-      <div className="glass-card px-5 py-3 flex items-center gap-3">
+      <div className="glass-card px-7 py-4 flex items-center gap-4">
         {/* LIVE badge */}
         <div className="flex items-center gap-1.5 shrink-0">
           <span
-            className="w-2 h-2 rounded-full transition-opacity duration-500"
+            className="w-2.5 h-2.5 rounded-full transition-opacity duration-500"
             style={{
               background: COLORS.liveDot,
-              boxShadow: pulseOn ? `0 0 8px ${COLORS.liveDot}, 0 0 16px rgba(255,68,68,0.3)` : `0 0 4px ${COLORS.liveDot}80`,
+              boxShadow: pulseOn ? `0 0 10px ${COLORS.liveDot}, 0 0 20px rgba(255,68,68,0.3)` : `0 0 5px ${COLORS.liveDot}80`,
               opacity: pulseOn ? 1 : 0.6,
             }}
           />
-          <span className="text-[10px] font-mono font-semibold tracking-wider" style={{ color: COLORS.liveText }}>
+          <span className="text-xs font-mono font-semibold tracking-wider" style={{ color: COLORS.liveText }}>
             LIVE
           </span>
         </div>
 
         {/* Time */}
-        <span className="text-xs font-mono shrink-0" style={{ color: COLORS.textPrimary }}>
+        <span className="text-sm font-mono shrink-0" style={{ color: COLORS.textPrimary }}>
           {formatTime(currentTime)}
         </span>
 
@@ -142,14 +142,14 @@ function LiveControlBar({
         </div>
 
         {/* Event count */}
-        <span className="text-[10px] font-mono shrink-0" style={{ color: COLORS.textMuted }}>
+        <span className="text-xs font-mono shrink-0" style={{ color: COLORS.textMuted }}>
           {eventCount}
         </span>
 
         {/* Review button */}
         <button
           onClick={onEnterReview}
-          className="px-2.5 py-1 rounded text-[10px] font-mono transition-all hover:scale-105"
+          className="px-3.5 py-1.5 rounded text-xs font-mono transition-all hover:scale-105"
           style={{
             background: COLORS.holoBg10,
             border: `1px solid ${COLORS.reviewBtnBorder}`,
@@ -201,24 +201,24 @@ function ReviewControlBar({
       className="absolute bottom-4 left-4 right-4 mx-auto"
       style={{ pointerEvents: 'auto', maxWidth: POPUP.controlBarMaxWidth, zIndex: Z.controlBar }}
     >
-      <div className="glass-card px-5 py-3 flex items-center gap-3">
+      <div className="glass-card px-7 py-4 flex items-center gap-4">
         {/* Play/Pause */}
         <button
           onClick={onPlayPause}
-          className="w-9 h-9 rounded-full flex items-center justify-center transition-all shrink-0 hover:scale-110"
+          className="w-11 h-11 rounded-full flex items-center justify-center transition-all shrink-0 hover:scale-110"
           style={{
             background: isPlaying ? COLORS.playBtnActiveBg : COLORS.playBtnBg,
             border: `1.5px solid ${COLORS.playBtnBorder}`,
             boxShadow: COLORS.playBtnGlow,
           }}
         >
-          <span style={{ color: COLORS.textPrimary, fontSize: 14, marginLeft: isPlaying ? 0 : 2 }}>
+          <span style={{ color: COLORS.textPrimary, fontSize: 18, marginLeft: isPlaying ? 0 : 2 }}>
             {isPlaying ? '⏸' : '▶'}
           </span>
         </button>
 
         {/* Time */}
-        <span className="text-xs font-mono shrink-0" style={{ color: COLORS.textPrimary, minWidth: 42 }}>
+        <span className="text-sm font-mono shrink-0" style={{ color: COLORS.textPrimary, minWidth: 48 }}>
           {formatTime(currentTime)}
         </span>
 
@@ -267,17 +267,17 @@ function ReviewControlBar({
         </div>
 
         {/* Duration */}
-        <span className="text-[10px] font-mono shrink-0" style={{ color: COLORS.textMuted }}>
+        <span className="text-xs font-mono shrink-0" style={{ color: COLORS.textMuted }}>
           {formatTime(totalDuration)}
         </span>
 
         {/* Speed controls */}
-        <div className="flex items-center gap-0.5 shrink-0">
+        <div className="flex items-center gap-1 shrink-0">
           {SPEEDS.map((s) => (
             <button
               key={s}
               onClick={() => onSpeedChange(s)}
-              className="px-2 py-0.5 rounded text-[10px] font-mono transition-all"
+              className="px-2.5 py-1 rounded text-xs font-mono transition-all"
               style={{
                 background: speed === s ? COLORS.playBtnActiveBg : 'transparent',
                 color: speed === s ? COLORS.textPrimary : COLORS.textMuted,
@@ -292,7 +292,7 @@ function ReviewControlBar({
         {isReviewing && (
           <button
             onClick={onResumeLive}
-            className="px-2.5 py-1 rounded text-[10px] font-mono font-semibold transition-all hover:scale-105 shrink-0"
+            className="px-3.5 py-1.5 rounded text-xs font-mono font-semibold transition-all hover:scale-105 shrink-0"
             style={{
               background: COLORS.liveResumeBg,
               border: `1px solid ${COLORS.liveResumeBorder}`,
@@ -307,7 +307,7 @@ function ReviewControlBar({
         {isReviewing && (
           <button
             onClick={onRestart}
-            className="text-sm transition-all shrink-0 hover:scale-110"
+            className="text-base transition-all shrink-0 hover:scale-110"
             style={{ color: COLORS.textDim }}
           >
             ⟲

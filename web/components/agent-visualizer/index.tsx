@@ -22,6 +22,7 @@ import { COLORS } from "@/lib/colors"
 
 import { MOCK_DURATION } from "@/lib/mock-scenario"
 import { MessageFeedPanel } from "./message-feed-panel"
+import { LegendPanel } from "./legend-panel"
 import { TopBar } from "./top-bar"
 import { useAudioEffects } from "@/hooks/use-audio-effects"
 
@@ -69,6 +70,7 @@ export function AgentVisualizer() {
   const [showTimeline, setShowTimeline] = useState(false)
   const [showFileAttention, setShowFileAttention] = useState(false)
   const [showTranscript, setShowTranscript] = useState(false)
+  const [showLegend, setShowLegend] = useState(true)
 
   // Mutually exclusive panel toggling — opening one closes the others
   const toggleExclusivePanel = useCallback((panel: 'files' | 'transcript' | 'cost') => {
@@ -234,6 +236,7 @@ export function AgentVisualizer() {
       { label: '🔍  Zoom to Fit', onClick: () => setZoomToFitTrigger(n => n + 1) },
       { label: '📊  Toggle Stats', onClick: () => setShowStats(prev => !prev) },
       { label: '⬡  Toggle Grid', onClick: () => setShowHexGrid(prev => !prev) },
+      { label: 'ⓘ  Toggle Legend', onClick: () => setShowLegend(prev => !prev) },
       { label: '', onClick: () => {}, separator: true },
       { label: '⟲  Restart', onClick: restart },
     ]
@@ -262,9 +265,9 @@ export function AgentVisualizer() {
       {/* Empty state when no demo and no live data */}
       {isEmpty && (
         <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
-          <div className="text-center" style={{ fontFamily: "'SF Mono', 'Fira Code', monospace" }}>
-            <div className="text-sm" style={{ color: '#66ccff80' }}>WAITING FOR AGENT SESSION</div>
-            <div className="mt-2 text-xs" style={{ color: '#66ccff40' }}>Start a Claude Code session to see activity</div>
+          <div className="text-center">
+            <div className="text-base font-medium" style={{ color: COLORS.textDim, letterSpacing: '-0.01em' }}>Waiting for an agent session</div>
+            <div className="mt-1.5 text-sm" style={{ color: COLORS.textMuted }}>Start a Claude Code session to see activity</div>
           </div>
         </div>
       )}
@@ -288,6 +291,9 @@ export function AgentVisualizer() {
         selectedDiscoveryId={selection.selectedDiscoveryId}
         showCostOverlay={showCostOverlay}
       />
+
+      {/* Legend (bottom-left) — documents the visual language */}
+      <LegendPanel visible={showLegend} onClose={() => setShowLegend(false)} />
 
       {/* Message feed panel (top-left) */}
       <MessageFeedPanel
