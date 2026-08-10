@@ -16,7 +16,8 @@
   "categories": ["Visualization", "Other"],
   "keywords": ["llm", "agent", "claude", "codex", "ai", "visualization", "orchestration"],
   "activationEvents": [
-    "onWebviewPanel:agentVisualizer"
+    "onWebviewPanel:agentVisualizer",
+    "onStartupFinished"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -39,6 +40,16 @@
       {
         "command": "agentVisualizer.configureHooks",
         "title": "Configure Claude Code Hooks",
+        "category": "Agent Flow"
+      },
+      {
+        "command": "agentVisualizer.revealStudyFolder",
+        "title": "Reveal Study Data Folder",
+        "category": "Agent Flow"
+      },
+      {
+        "command": "agentVisualizer.packageStudyData",
+        "title": "Package Study Data (Zip)",
         "category": "Agent Flow"
       }
     ],
@@ -77,6 +88,21 @@
           "type": "boolean",
           "default": false,
           "description": "Automatically open the visualizer when an agent session starts"
+        },
+        "agentVisualizer.studyStorage.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Research build: capture full local copies of Claude Code sessions into a 'study-storage/' folder for sharing with researchers. Requires one-time in-editor consent. Off by default."
+        },
+        "agentVisualizer.studyStorage.path": {
+          "type": "string",
+          "default": "",
+          "description": "Folder for study capture. Empty = '<workspace>/study-storage'. Relative paths resolve against the workspace root."
+        },
+        "agentVisualizer.studyStorage.participantId": {
+          "type": "string",
+          "default": "",
+          "description": "Study-assigned participant id recorded in the capture manifest (not personally identifying)."
         }
       }
     }

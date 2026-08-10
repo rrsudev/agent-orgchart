@@ -52,9 +52,9 @@ export function FileAttentionPanel({ visible, fileAttention, onClose, onOpenFile
             return (
               <div
                 key={file.path}
-                className={`rounded px-2 py-1.5 transition-colors ${canOpen ? 'hover:brightness-125' : ''}`}
+                className={`rounded px-2 py-1.5 transition-colors ${canOpen ? 'hover:brightness-[0.97]' : ''}`}
                 style={{
-                  background: `rgba(10, 15, 30, 0.5)`,
+                  background: `rgba(0, 0, 0, 0.035)`,
                   border: `1px solid ${canOpen ? heatColor + '30' : heatColor + '15'}`,
                   cursor: canOpen ? 'pointer' : undefined,
                 }}

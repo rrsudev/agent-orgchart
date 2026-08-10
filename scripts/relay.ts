@@ -21,6 +21,8 @@ import {
   HOOK_SERVER_NOT_STARTED, WORKSPACE_HASH_LENGTH,
 } from '../extension/src/constants'
 import { setLogLevel } from '../extension/src/logger'
+import { StudyStorage } from '../extension/src/study-storage'
+import { buildIndex, isSqliteAvailable } from '../extension/src/study-index'
 import type { TelemetryClient } from './telemetry'
 
 const MAX_EVENT_BUFFER = 5000
@@ -30,6 +32,84 @@ const CLAUDE_DIR = path.join(os.homedir(), '.claude', 'projects')
 let relayCreated = false
 let verbose = false
 let sessionEventCount = 0
+/** Optional research capture sink (Phase 1). Enabled via AGENT_FLOW_STUDY_STORAGE.
+ *  Null when disabled — every call site guards with `?.` so it's a no-op. */
+let studyStorage: StudyStorage | null = null
+
+/** Resolve the study-storage capture sink from the environment.
+ *  AGENT_FLOW_STUDY_STORAGE: "1"/"true" → <workspace>/study-storage,
+ *  or an explicit path. Unset / "0" / "false" → disabled.
+ *  AGENT_FLOW_STUDY_PARTICIPANT: study-assigned participant id. */
+function resolveStudyStorage(workspace: string, toolVersion: string): StudyStorage | null {
+  const raw = process.env.AGENT_FLOW_STUDY_STORAGE
+  if (!raw || raw === '0' || raw.toLowerCase() === 'false') return null
+
+  let workspaceRoot = workspace
+  try { workspaceRoot = fs.realpathSync(workspace) } catch {}
+
+  const enabledByFlag = raw === '1' || raw.toLowerCase() === 'true'
+  const storageRoot = enabledByFlag
+    ? path.join(workspaceRoot, 'study-storage')
+    : path.resolve(raw)
+
+  return new StudyStorage({
+    storageRoot,
+    workspaceRoot,
+    participantId: process.env.AGENT_FLOW_STUDY_PARTICIPANT,
+    toolVersion,
+    verbose,
+  })
+}
+
+/** Import ALL of this project's historical Claude sessions into backfill/.
+ *  Mirrors scanForActiveSessions' project-dir resolution but ignores age and
+ *  imports every session (idempotent — already-captured sessions are skipped). */
+function backfillClaudeHistory(workspace: string) {
+  if (!studyStorage || !fs.existsSync(CLAUDE_DIR)) return
+
+  let resolved = workspace
+  try { resolved = fs.realpathSync(resolved) } catch {}
+  const encoded = resolved.replace(/[^a-zA-Z0-9]/g, '-')
+  const encodedFolded = foldPathCase(encoded)
+
+  const dirsToScan: string[] = []
+  try {
+    for (const dir of fs.readdirSync(CLAUDE_DIR, { withFileTypes: true })) {
+      if (!dir.isDirectory()) continue
+      const nameFolded = foldPathCase(dir.name)
+      if (nameFolded === encodedFolded || nameFolded.startsWith(encodedFolded + '-')) {
+        dirsToScan.push(path.join(CLAUDE_DIR, dir.name))
+      }
+    }
+  } catch {
+    const projectDir = path.join(CLAUDE_DIR, encoded)
+    if (fs.existsSync(projectDir)) dirsToScan.push(projectDir)
+  }
+
+  let imported = 0
+  for (const dirPath of dirsToScan) {
+    try {
+      for (const file of fs.readdirSync(dirPath)) {
+        if (!file.endsWith('.jsonl')) continue
+        const sessionId = path.basename(file, '.jsonl')
+        if (studyStorage.backfillClaudeSession(sessionId, path.join(dirPath, file))) imported++
+      }
+    } catch { /* skip unreadable dir */ }
+  }
+  if (imported > 0) log(`[study-storage] backfilled ${imported} historical session(s)`)
+}
+
+/** Best-effort rebuild of study.sqlite. No-op (with a log) when node:sqlite is
+ *  unavailable (Node < 22.5); raw capture is unaffected. Never throws. */
+function buildStudyIndex(reason: string) {
+  if (!studyStorage || !isSqliteAvailable()) return
+  try {
+    const r = buildIndex(studyStorage.getStorageRoot(), { verbose })
+    log(`[study-index] (${reason}) indexed ${r.sessions} sessions, ${r.turns} turns, ${r.toolCalls} tool calls`)
+  } catch (e) {
+    log('[study-index] build failed:', e)
+  }
+}
 /** Distinct model IDs seen across all watched sessions during this relay session.
  *  Populated from `model_detected` events (emitted by both the Claude transcript
  *  parser and the Codex rollout parser). Read at session_end for telemetry. */
@@ -97,6 +177,9 @@ function broadcastEvent(event: AgentEvent) {
     eventBuffer.set(event.sessionId, buf)
   }
 
+  // Capture the normalized stream (write-if-registered; won't create folders).
+  studyStorage?.appendEvent(event)
+
   broadcast(JSON.stringify({ type: 'agent-event', event }))
 }
 
@@ -107,6 +190,7 @@ function broadcastSessionLifecycle(type: 'started' | 'ended' | 'updated', sessio
       session: { id: sessionId, label, status: 'active', startTime: Date.now(), lastActivityTime: Date.now() } as SessionInfo,
     }))
   } else if (type === 'ended') {
+    studyStorage?.finalizeSession(sessionId)
     broadcast(JSON.stringify({ type: 'session-ended', sessionId }))
   } else if (type === 'updated') {
     broadcast(JSON.stringify({ type: 'session-updated', sessionId, label }))
@@ -213,6 +297,9 @@ function watchSession(sessionId: string, filePath: string) {
     contextBreakdown: { systemPrompt: SYSTEM_PROMPT_BASE_TOKENS, userMessages: 0, toolResults: 0, reasoning: 0, subagentResults: 0 },
   }
   sessions.set(sessionId, session)
+  // Register with the capture sink before any events are emitted for this
+  // session, so the folder exists and the raw transcript is mirrored.
+  studyStorage?.registerClaudeSession(sessionId, filePath)
 
   const stat = fs.statSync(filePath)
   const catchUpEntries = parser.prescanExistingContent(filePath, stat.size, session)
@@ -240,6 +327,8 @@ function watchSession(sessionId: string, filePath: string) {
       readSubagentNewLines(watcherDelegate, parser, subPath, sessionId)
     }
     scanSubagentsDir(watcherDelegate, parser, sessionId)
+    // Catch subagent / tool-result files that changed without the main file.
+    studyStorage?.syncClaudeSession(sessionId)
   }, POLL_FALLBACK_MS)
 
   session.subagentsDir = path.join(path.dirname(filePath), sessionId, 'subagents')
@@ -262,6 +351,7 @@ function readNewLines(sessionId: string) {
 
   handlePermissionDetection(watcherDelegate, ORCHESTRATOR_NAME, session.pendingToolCalls, session, sessionId, session.sessionCompleted, true)
   scanSubagentsDir(watcherDelegate, parser, sessionId)
+  studyStorage?.syncClaudeSession(sessionId)
   resetInactivityTimer(sessionId)
 }
 
@@ -391,6 +481,14 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
   const wantCodex = mode === 'codex' || mode === 'auto'
   log(`[relay] Runtime mode: ${mode} (watching: ${[wantClaude && 'claude', wantCodex && 'codex'].filter(Boolean).join(', ')})`)
 
+  // Research capture sink (Phase 1). Created before the hook server so its raw
+  // and normalized taps can be wired. No-op when disabled.
+  studyStorage = resolveStudyStorage(workspace, resolveAgentFlowVersion())
+  if (studyStorage) {
+    studyStorage.init()
+    log('[relay] Study storage capture enabled')
+  }
+
   let hookServer: HookServer | null = null
   let scanInterval: NodeJS.Timeout | null = null
   let projectDirWatcher: fs.FSWatcher | null = null
@@ -403,12 +501,22 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
     }
 
     hookServer.onEvent((event: AgentEvent) => {
+      // Hook events bypass broadcastEvent's buffer, so capture them here.
+      // ensureRuntime='claude' creates the folder if a hook precedes the scan.
+      studyStorage?.appendEvent(event, 'claude')
       broadcast(JSON.stringify({ type: 'agent-event', event }))
     })
+
+    // Capture the raw, unmodified hook payloads (richest out-of-band signal).
+    hookServer.onRawHook((payload) => studyStorage?.appendRawHook(payload))
 
     writeDiscoveryFile(hookPort, workspace)
 
     scanForActiveSessions(workspace)
+    // Backfill AFTER the active-session scan so currently-active sessions already
+    // have live/ folders and are skipped (never imported as backfill duplicates).
+    backfillClaudeHistory(workspace)
+    buildStudyIndex('startup')
     scanInterval = setInterval(() => scanForActiveSessions(workspace), SCAN_INTERVAL_MS)
 
     const resolved = (() => { try { return fs.realpathSync(workspace) } catch { return workspace } })()
@@ -434,6 +542,9 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
     codexWatcher = new CodexSessionWatcher(workspace)
     codexWatcher.onEvent((event) => broadcastEvent(event))
     codexWatcher.onSessionLifecycle((lifecycle) => {
+      // Register Codex sessions so events.jsonl is captured (raw rollout
+      // mirroring is deferred to a later phase).
+      if (lifecycle.type === 'started') studyStorage?.registerCodexSession(lifecycle.sessionId)
       broadcastSessionLifecycle(lifecycle.type, lifecycle.sessionId, lifecycle.label)
     })
     codexWatcher.start()
@@ -500,16 +611,22 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
         sendSSE(res, { type: 'session-list', sessions: sessionList })
       }
 
-      // Replay buffered events for the most recent active session
+      // Replay buffered history for EVERY session, not just the most recent
+      // one. The web client buffers events per session (keyed by sessionId) and
+      // the "all agents" parallel view merges every session's buffer — so if we
+      // only backfilled one session, the others would render empty (in both
+      // their own tab and the combined view) until new live events arrived.
+      // Ordered most-recent-active first so the client's auto-select (which
+      // picks the same sort order) lands on the primary session.
       const sorted = [...sessionList].sort((a, b) => {
         const aActive = a.status === 'active' ? 1 : 0
         const bActive = b.status === 'active' ? 1 : 0
         if (aActive !== bActive) return bActive - aActive
         return b.lastActivityTime - a.lastActivityTime
       })
-      if (sorted.length > 0) {
-        const buffered = eventBuffer.get(sorted[0].id)
-        if (buffered) {
+      for (const session of sorted) {
+        const buffered = eventBuffer.get(session.id)
+        if (buffered && buffered.length > 0) {
           sendSSE(res, { type: 'agent-event-batch', events: buffered })
         }
       }
@@ -520,6 +637,8 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
       // callers or hot-reload could call this twice.
       if (relayDisposed) return
       relayDisposed = true
+      studyStorage?.dispose()
+      buildStudyIndex('shutdown')
       const models = [...observedModels].sort().join(',').slice(0, 128)
       const runtimes = [wantClaude && 'claude', wantCodex && 'codex'].filter(Boolean).join(',')
       telemetry?.emit({

@@ -121,7 +121,7 @@ function LiveControlBar({
               opacity: pulseOn ? 1 : 0.6,
             }}
           />
-          <span className="text-xs font-mono font-semibold tracking-wider" style={{ color: COLORS.liveText }}>
+          <span className="text-[13px] font-mono font-semibold tracking-wider" style={{ color: COLORS.liveText }}>
             LIVE
           </span>
         </div>
@@ -142,14 +142,14 @@ function LiveControlBar({
         </div>
 
         {/* Event count */}
-        <span className="text-xs font-mono shrink-0" style={{ color: COLORS.textMuted }}>
+        <span className="text-[13px] font-mono font-medium shrink-0" style={{ color: COLORS.textMuted }}>
           {eventCount}
         </span>
 
         {/* Review button */}
         <button
           onClick={onEnterReview}
-          className="px-3.5 py-1.5 rounded text-xs font-mono transition-all hover:scale-105"
+          className="px-3.5 py-1.5 rounded text-[13px] font-mono font-medium transition-all hover:scale-105"
           style={{
             background: COLORS.holoBg10,
             border: `1px solid ${COLORS.reviewBtnBorder}`,
@@ -267,7 +267,7 @@ function ReviewControlBar({
         </div>
 
         {/* Duration */}
-        <span className="text-xs font-mono shrink-0" style={{ color: COLORS.textMuted }}>
+        <span className="text-[13px] font-mono font-medium shrink-0" style={{ color: COLORS.textMuted }}>
           {formatTime(totalDuration)}
         </span>
 
@@ -277,7 +277,7 @@ function ReviewControlBar({
             <button
               key={s}
               onClick={() => onSpeedChange(s)}
-              className="px-2.5 py-1 rounded text-xs font-mono transition-all"
+              className="px-2.5 py-1 rounded text-[13px] font-mono font-medium transition-all"
               style={{
                 background: speed === s ? COLORS.playBtnActiveBg : 'transparent',
                 color: speed === s ? COLORS.textPrimary : COLORS.textMuted,
@@ -292,7 +292,7 @@ function ReviewControlBar({
         {isReviewing && (
           <button
             onClick={onResumeLive}
-            className="px-3.5 py-1.5 rounded text-xs font-mono font-semibold transition-all hover:scale-105 shrink-0"
+            className="px-3.5 py-1.5 rounded text-[13px] font-mono font-semibold transition-all hover:scale-105 shrink-0"
             style={{
               background: COLORS.liveResumeBg,
               border: `1px solid ${COLORS.liveResumeBorder}`,

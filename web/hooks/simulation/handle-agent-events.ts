@@ -15,6 +15,9 @@ export function handleAgentSpawn(
   ctx: ProcessEventContext,
 ): void {
   const name = asString(payload.name)
+  // Identity (`name`) may be session-namespaced in the parallel view; the visible
+  // label comes from `displayName` when present so nodes read cleanly.
+  const displayName = asString(payload.displayName, name)
   const parentId = typeof payload.parent === 'string' ? payload.parent : undefined
   const isMain = asBoolean(payload.isMain)
   const task = typeof payload.task === 'string' ? payload.task : undefined
@@ -36,6 +39,13 @@ export function handleAgentSpawn(
   }
 
   let x = 0, y = 0
+  if (!parentId) {
+    // Parentless root (orchestrator). The parallel view injects a distinct
+    // spawn position so orchestrators from different sessions don't overlap;
+    // in single-session views these are absent and it stays centered at 0,0.
+    if (typeof payload.spawnX === 'number') x = payload.spawnX
+    if (typeof payload.spawnY === 'number') y = payload.spawnY
+  }
   if (parentId) {
     const parent = state.agents.get(parentId)
     if (parent) {
@@ -74,7 +84,7 @@ export function handleAgentSpawn(
   }
 
   const agent: Agent = {
-    id: name, name, state: 'idle',
+    id: name, name: displayName, state: 'idle',
     parentId: parentId || null,
     tokensUsed: 0, tokensMax: ctx.getContextWindowSize(model),
     contextBreakdown: emptyContextBreakdown(),
@@ -97,7 +107,7 @@ export function handleAgentSpawn(
   const timelineEntry: TimelineEntry = {
     id: `timeline-${name}`,
     agentId: name,
-    agentName: name,
+    agentName: displayName,
     startTime: currentTime,
     blocks: [],
   }

@@ -97,10 +97,10 @@ export const COLORS = {
   textDim: INK2,
   textMuted: INK3,
 
-  // Glass card — light "vibrancy" material: translucent white + hairline
-  glassBg: 'rgba(255, 255, 255, 0.72)',
-  glassBorder: `rgba(${HAIRLINE}, 0.1)`,
-  glassHighlight: 'rgba(255, 255, 255, 0.6)',
+  // Glass card — near-opaque, very light gray material (Apple/Notion) + hairline
+  glassBg: 'rgba(247, 247, 249, 0.94)',
+  glassBorder: `rgba(${HAIRLINE}, 0.12)`,
+  glassHighlight: 'rgba(255, 255, 255, 0.8)',
 
   // Accent-tinted subtle fills; neutral hairline borders
   holoBg03: `rgba(${ACCENT_RGB}, 0.04)`,
@@ -112,7 +112,7 @@ export const COLORS = {
   holoBorder12: `rgba(${HAIRLINE}, 0.12)`,
 
   // Panel chrome
-  panelBg: 'rgba(255, 255, 255, 0.85)',
+  panelBg: 'rgba(247, 247, 249, 0.96)',
   panelSeparator: `rgba(${HAIRLINE}, 0.06)`,
 
   // Toggle button states
@@ -168,9 +168,6 @@ export const COLORS = {
   scrubberHeadGlow: `0 1px 4px rgba(${HAIRLINE}, 0.18)`,
   reviewBtnBorder: `rgba(${ACCENT_RGB}, 0.35)`,
 
-  // Cost overlay
-  costActiveBg: `rgba(${GREEN_RGB}, 0.12)`,
-
   // Canvas drawing — bubble base colors (partial rgba, alpha appended at draw time)
   bubbleThinkingBase: `rgba(${PURPLE_RGB},`,
   bubbleUserBase: `rgba(${AMBER_RGB},`,
@@ -194,15 +191,6 @@ export const COLORS = {
   toolIndicatorBorder: `rgba(${AMBER_RGB}, 0.22)`,
   toolIndicatorText: AMBER_HEX,
 
-  // Canvas drawing — cost labels
-  costText: GREEN_HEX,
-  costTextDim: '#248a3d99',
-  costPillBg: 'rgba(255, 255, 255, 0.85)',
-  costPillStroke: `rgba(${GREEN_RGB}, 0.35)`,
-
-  // Canvas drawing — cost panel bar fills
-  barFillMain: `rgba(${ACCENT_RGB}, 0.15)`,
-  barFillSub: `rgba(${PURPLE_RGB}, 0.15)`,
 
   // ─── Transcript / message feed colors ───────────────────────────────────────
 

@@ -59,6 +59,13 @@ export class HookServer implements vscode.Disposable {
 
   readonly onEvent = this._onEvent.event
 
+  /** Fires the raw, unmodified hook payload before it is normalized into
+   *  AgentEvents. Used by StudyStorage to capture the full hook signal
+   *  (permission prompts, failures, timing) that the normalized stream drops. */
+  private readonly _onRawHook = new vscode.EventEmitter<HookPayload>()
+
+  readonly onRawHook = this._onRawHook.event
+
   constructor(port?: number) {
     this.port = port ?? 0
   }
@@ -148,6 +155,11 @@ export class HookServer implements vscode.Disposable {
   private handleHook(payload: HookPayload): void {
     const eventName = payload.hook_event_name
     log.debug(eventName, payload.tool_name || payload.agent_type || '')
+
+    // Emit the raw payload first, before any normalization, so a capture sink
+    // records the complete hook signal even for events we don't map (and so the
+    // session folder exists before the normalized events below fire).
+    this._onRawHook.fire(payload)
 
     switch (eventName) {
       case 'SessionStart':
@@ -343,5 +355,6 @@ export class HookServer implements vscode.Disposable {
     }
     this.sessionState.clear()
     this._onEvent.dispose()
+    this._onRawHook.dispose()
   }
 }

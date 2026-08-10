@@ -4,31 +4,8 @@ import { memo } from "react"
 import { Z } from "@/lib/agent-types"
 import { COLORS } from "@/lib/colors"
 import { formatTokens } from "@/lib/utils"
-import { agentCost } from "./canvas/draw-cost"
 import { SessionTabs } from "./session-tabs"
 import type { SessionInfo, ConnectionStatus } from "@/lib/bridge-types"
-
-// ─── Mute/Unmute SVG Icons ───────────────────────────────────────────────────
-
-function MutedIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-      <line x1="23" y1="9" x2="17" y2="15" />
-      <line x1="17" y1="9" x2="23" y2="15" />
-    </svg>
-  )
-}
-
-function UnmutedIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-      <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
-      <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-    </svg>
-  )
-}
 
 // ─── Toggle Button ──────────────────────────────────────────────────────────
 
@@ -83,6 +60,7 @@ export interface TopBarProps {
   sessionsWithActivity: Set<string>
   onSelectSession: (id: string) => void
   onCloseSession: (id: string) => void
+  onRenameSession: (id: string, label: string) => void
   // Connection
   isVSCode: boolean
   connectionStatus: ConnectionStatus
@@ -92,24 +70,21 @@ export interface TopBarProps {
   // Panel toggles
   showFileAttention: boolean
   showTranscript: boolean
-  showCostOverlay: boolean
   showTimeline: boolean
-  isMuted: boolean
-  onTogglePanel: (panel: 'files' | 'transcript' | 'cost') => void
+  onTogglePanel: (panel: 'files' | 'transcript') => void
   onToggleTimeline: () => void
-  onToggleMute: () => void
 }
 
 export const TopBar = memo(function TopBar({
   sessions, selectedSessionId, sessionsWithActivity,
-  onSelectSession, onCloseSession,
+  onSelectSession, onCloseSession, onRenameSession,
   isVSCode, connectionStatus,
   agentCount, totalTokens,
-  showFileAttention, showTranscript, showCostOverlay, showTimeline, isMuted,
-  onTogglePanel, onToggleTimeline, onToggleMute,
+  showFileAttention, showTranscript, showTimeline,
+  onTogglePanel, onToggleTimeline,
 }: TopBarProps) {
   return (
-    <div className="absolute top-4 left-4 right-4 flex items-center gap-5 font-mono text-xs" style={{ zIndex: Z.info }}>
+    <div className="absolute top-4 left-4 right-4 flex items-center gap-5 font-mono text-[14px] font-medium" style={{ zIndex: Z.info }}>
       {/* Session tabs — scrollable, takes available space */}
       {sessions.length > 1 && (
         <div className="min-w-0 flex-shrink overflow-x-auto scrollbar-hide">
@@ -119,6 +94,7 @@ export const TopBar = memo(function TopBar({
             sessionsWithActivity={sessionsWithActivity}
             onSelectSession={onSelectSession}
             onCloseSession={onCloseSession}
+            onRenameSession={onRenameSession}
           />
         </div>
       )}
@@ -130,12 +106,7 @@ export const TopBar = memo(function TopBar({
       <div className="flex items-center gap-5 flex-shrink-0" style={{ color: COLORS.textMuted }}>
         {isVSCode && <ConnectionIndicator status={connectionStatus} />}
         <span>{agentCount} agents</span>
-        <span>
-          {formatTokens(totalTokens)} tokens
-          <span style={{ color: COLORS.complete + '65', marginLeft: 4 }}>
-            ~${agentCost(totalTokens).toFixed(2)}
-          </span>
-        </span>
+        <span>{formatTokens(totalTokens)} tokens</span>
 
         {/* Mutually exclusive panel group */}
         <div className="flex items-center gap-1.5 px-1.5 py-1 rounded" style={{
@@ -144,21 +115,10 @@ export const TopBar = memo(function TopBar({
         }}>
           <ToggleButton active={showFileAttention} onClick={() => onTogglePanel('files')} style={{ background: showFileAttention ? undefined : 'transparent', border: 'none' }}>Files</ToggleButton>
           <ToggleButton active={showTranscript} onClick={() => onTogglePanel('transcript')} style={{ background: showTranscript ? undefined : 'transparent', border: 'none' }}>Chat</ToggleButton>
-          <ToggleButton
-            active={showCostOverlay}
-            onClick={() => onTogglePanel('cost')}
-            activeColor={{ bg: COLORS.costActiveBg, text: COLORS.complete }}
-            style={{ background: showCostOverlay ? undefined : 'transparent', border: 'none' }}
-          >
-            $Cost
-          </ToggleButton>
         </div>
 
         {/* Independent toggles */}
         <ToggleButton active={showTimeline} onClick={onToggleTimeline}>Timeline</ToggleButton>
-        <ToggleButton active={!isMuted} onClick={onToggleMute} style={{ border: `1px solid ${COLORS.toggleBorder}` }}>
-          {isMuted ? <MutedIcon /> : <UnmutedIcon />}
-        </ToggleButton>
       </div>
     </div>
   )

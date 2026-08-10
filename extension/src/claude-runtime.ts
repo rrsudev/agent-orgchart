@@ -28,8 +28,21 @@ import {
 import { createLogger } from './logger'
 import { wireWatcherToPanel } from './session-runtime'
 import type { AgentRuntime } from './session-runtime'
+import type { StudyStorage } from './study-storage'
+import { buildIndex, isSqliteAvailable } from './study-index'
 
 const log = createLogger('ClaudeRuntime')
+
+/** Best-effort rebuild of study.sqlite. No-op on Node < 22.5; never throws. */
+function safeBuildStudyIndex(studyStorage: StudyStorage | undefined, reason: string): void {
+  if (!studyStorage || !isSqliteAvailable()) return
+  try {
+    const r = buildIndex(studyStorage.getStorageRoot())
+    log.info(`Study index (${reason}): ${r.sessions} sessions, ${r.turns} turns, ${r.toolCalls} tool calls`)
+  } catch (err) {
+    log.debug('Study index build failed:', err)
+  }
+}
 
 /** Events the session watcher already owns end-to-end via the transcript parser.
  *  Letting hooks re-emit these would create duplicate nodes with divergent names
@@ -51,6 +64,7 @@ function filterOrchestratorCompletion(event: AgentEvent): AgentEvent | null {
 
 export async function startClaudeRuntime(
   context: vscode.ExtensionContext,
+  studyStorage?: StudyStorage,
 ): Promise<AgentRuntime> {
   // ─── Hook server ───────────────────────────────────────────────────────────
   const hookServer = new HookServer()
@@ -81,12 +95,19 @@ export async function startClaudeRuntime(
   }
 
   // ─── Session watcher ───────────────────────────────────────────────────────
-  const watcher = new SessionWatcher()
+  const watcher = new SessionWatcher(studyStorage)
   context.subscriptions.push(watcher)
 
   // Route hook events → panel, but filter out events the watcher already owns
   if (hookPort !== HOOK_SERVER_NOT_STARTED) {
+    // Capture raw hook payloads (permission prompts, failures, timing) regardless
+    // of whether a panel is open — this is the richest out-of-band signal.
+    hookServer.onRawHook((payload) => studyStorage?.appendRawHook(payload))
+
     hookServer.onEvent((event) => {
+      // Persist to study-storage before any panel-readiness gating below.
+      studyStorage?.appendEvent(event, 'claude')
+
       const panel = VisualizerPanel.getCurrent()
       if (!panel || !panel.isReady) return
 
@@ -127,6 +148,13 @@ export async function startClaudeRuntime(
 
   watcher.start()
 
+  // Backfill AFTER start() so currently-active sessions are already registered
+  // as live and skipped (never duplicated), then build the initial index.
+  if (studyStorage) {
+    watcher.backfillClaudeHistory()
+    safeBuildStudyIndex(studyStorage, 'startup')
+  }
+
   const connectionStatus = (): string => {
     if (hookPort > 0) return `Hooks :${hookPort} + session watcher`
     return 'Session watcher'
@@ -142,6 +170,8 @@ export async function startClaudeRuntime(
     wiring.dispose()
     hookServer.dispose()
     watcher.dispose()
+    // Rebuild the index once more so this run's live sessions are included.
+    safeBuildStudyIndex(studyStorage, 'shutdown')
   }
 
   return { mode: 'claude', watcher, connectionStatus, dispose }

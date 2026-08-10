@@ -22,3 +22,11 @@ export interface SessionInfo {
 }
 
 export type ConnectionStatus = 'connected' | 'disconnected' | 'watching'
+
+/**
+ * Sentinel "session id" for the parallel view — a pseudo-tab that combines every
+ * session and renders all agents at once. When this is the active filter, the
+ * simulation applies no per-session filtering and the bridge delivers events
+ * from all sessions.
+ */
+export const PARALLEL_VIEW_ID = '__all__'

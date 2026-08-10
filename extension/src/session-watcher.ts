@@ -13,6 +13,7 @@ import { readNewFileLines, foldPathCase } from './fs-utils'
 import { handlePermissionDetection } from './permission-detection'
 import { scanSubagentsDir, readSubagentNewLines } from './subagent-watcher'
 import { createLogger } from './logger'
+import type { StudyStorage } from './study-storage'
 
 const log = createLogger('SessionWatcher')
 
@@ -74,6 +75,10 @@ export class SessionWatcher implements AgentSessionWatcher {
   readonly onEvent = this._onEvent.event
   readonly onSessionDetected = this._onSessionDetected.event
   readonly onSessionLifecycle = this._onSessionLifecycle.event
+
+  /** Optional research capture sink. When present, raw transcripts are mirrored
+   *  and the normalized event stream is persisted per session. No-op otherwise. */
+  constructor(private readonly studyStorage?: StudyStorage) {}
 
   /** Whether any session is actively being tailed */
   isActive(): boolean {
@@ -414,6 +419,9 @@ export class SessionWatcher implements AgentSessionWatcher {
       contextBreakdown: { systemPrompt: SYSTEM_PROMPT_BASE_TOKENS, userMessages: 0, toolResults: 0, reasoning: 0, subagentResults: 0 },
     }
     this.sessions.set(sessionId, session)
+    // Register with the capture sink before any events are emitted so the folder
+    // exists and the raw transcript is mirrored from the start.
+    this.studyStorage?.registerClaudeSession(sessionId, filePath)
 
     const stat = fs.statSync(filePath)
 
@@ -466,6 +474,8 @@ export class SessionWatcher implements AgentSessionWatcher {
         readSubagentNewLines(this.selfDelegate, this.parser,subPath, sessionId)
       }
       scanSubagentsDir(this.selfDelegate, this.parser, sessionId)
+      // Catch subagent / tool-result files that changed without the main file.
+      this.studyStorage?.syncClaudeSession(sessionId)
     }, POLL_FALLBACK_MS)
 
     // Track subagents directory for this session
@@ -492,6 +502,9 @@ export class SessionWatcher implements AgentSessionWatcher {
 
     // Check for new subagent files
     scanSubagentsDir(this.selfDelegate, this.parser, sessionId)
+
+    // Mirror any newly-written raw bytes into the capture folder.
+    this.studyStorage?.syncClaudeSession(sessionId)
 
     // Reset inactivity timer — session is still active
     this.resetInactivityTimer(sessionId)
@@ -536,6 +549,7 @@ export class SessionWatcher implements AgentSessionWatcher {
           type: 'agent_complete',
           payload: { name: ORCHESTRATOR_NAME },
         }, sessionId)
+        this.studyStorage?.finalizeSession(sessionId)
         this._onSessionLifecycle.fire({ type: 'ended', sessionId, label: session.label })
       }
     }, INACTIVITY_TIMEOUT_MS)
@@ -586,7 +600,43 @@ export class SessionWatcher implements AgentSessionWatcher {
   }
 
   private emit(event: AgentEvent, sessionId?: string): void {
-    this._onEvent.fire(sessionId ? { ...event, sessionId } : event)
+    const final = sessionId ? { ...event, sessionId } : event
+    // Persist the normalized stream (write-if-registered — never creates folders).
+    this.studyStorage?.appendEvent(final)
+    this._onEvent.fire(final)
+  }
+
+  /** Import this project's historical Claude sessions into the capture folder's
+   *  backfill/ tree. Call AFTER start() so currently-active sessions are already
+   *  registered as live and therefore skipped (never duplicated as backfill). */
+  backfillClaudeHistory(): void {
+    if (!this.studyStorage || !fs.existsSync(CLAUDE_DIR)) return
+
+    const dirs: string[] = []
+    if (this.workspacePath) {
+      const projectDir = path.join(CLAUDE_DIR, this.workspacePath)
+      if (fs.existsSync(projectDir)) dirs.push(projectDir)
+      try {
+        for (const d of fs.readdirSync(CLAUDE_DIR, { withFileTypes: true })) {
+          if (!d.isDirectory()) continue
+          const full = path.join(CLAUDE_DIR, d.name)
+          if (full === projectDir) continue
+          if (this.isContainedProject(d.name)) dirs.push(full)
+        }
+      } catch { /* readdir may fail transiently */ }
+    }
+
+    let imported = 0
+    for (const dir of dirs) {
+      try {
+        for (const f of fs.readdirSync(dir)) {
+          if (!f.endsWith('.jsonl')) continue
+          const sid = path.basename(f, '.jsonl')
+          if (this.studyStorage.backfillClaudeSession(sid, path.join(dir, f))) imported++
+        }
+      } catch { /* skip unreadable dir */ }
+    }
+    if (imported > 0) log.info(`Backfilled ${imported} historical session(s) into study-storage`)
   }
 
   dispose(): void {

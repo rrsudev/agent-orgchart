@@ -9,6 +9,7 @@ import { PanelHeader, SlidingPanel, stopPropagationHandlers } from './shared-ui'
 interface LegendPanelProps {
   visible: boolean
   onClose: () => void
+  onOpen: () => void
 }
 
 /** SF-Symbols-style white line glyph — mirrors the canvas state badge so the
@@ -76,19 +77,45 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   )
 }
 
-export function LegendPanel({ visible, onClose }: LegendPanelProps) {
+export function LegendPanel({ visible, onClose, onOpen }: LegendPanelProps) {
   const [collapsed, setCollapsed] = useState(false)
 
   return (
-    <SlidingPanel
-      visible={visible}
-      position={{ left: 12, bottom: 12 }}
-      axis="Y"
-      offset={24}
-      zIndex={Z.sidePanel}
-      width={collapsed ? 'auto' : 224}
-      className="max-w-[240px]"
-    >
+    <>
+      {/* Persistent launcher — lets the user re-open the legend after closing it. */}
+      <div
+        {...stopPropagationHandlers}
+        className="absolute transition-opacity duration-200"
+        style={{
+          left: 12,
+          bottom: 12,
+          zIndex: Z.sidePanel,
+          opacity: visible ? 0 : 1,
+          pointerEvents: visible ? 'none' : 'auto',
+        }}
+      >
+        <GlassCard visible={!visible} style={{ padding: 0 }}>
+          <button
+            onClick={onOpen}
+            aria-label="Show legend"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-semibold transition-colors"
+            style={{ color: COLORS.textPrimary, letterSpacing: '-0.01em' }}
+          >
+            <span aria-hidden="true">ⓘ</span>
+            Legend
+          </button>
+        </GlassCard>
+      </div>
+
+      <SlidingPanel
+        visible={visible}
+        position={{ left: 12, bottom: 12 }}
+        axis="Y"
+        offset={24}
+        zIndex={Z.sidePanel}
+        width={collapsed ? 'auto' : 224}
+        className="max-w-[240px]"
+      >
       <div {...stopPropagationHandlers}>
         {collapsed ? (
           // Collapsed → compact, unobtrusive pill that expands on click.
@@ -164,5 +191,6 @@ export function LegendPanel({ visible, onClose }: LegendPanelProps) {
         )}
       </div>
     </SlidingPanel>
+    </>
   )
 }

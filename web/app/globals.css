@@ -36,10 +36,13 @@
      web/lib/colors.ts. ── */
   --accent-rgb: 0, 113, 227;
   --hairline-rgb: 0, 0, 0;
-  --glass-bg: rgba(255, 255, 255, 0.72);
-  --glass-border: rgba(var(--hairline-rgb), 0.1);
-  --glass-highlight: rgba(255, 255, 255, 0.6);
-  --glass-shadow: 0 1px 2px rgba(var(--hairline-rgb), 0.04), 0 4px 12px rgba(var(--hairline-rgb), 0.06);
+  /* Panels: a solid, very light gray (Apple/Notion) so content behind never
+     darkens or muddies them. Opaque enough to read as a light surface, with a
+     clear hairline border and soft shadow for depth. */
+  --glass-bg: rgba(247, 247, 249, 0.94);
+  --glass-border: rgba(var(--hairline-rgb), 0.12);
+  --glass-highlight: rgba(255, 255, 255, 0.8);
+  --glass-shadow: 0 1px 2px rgba(var(--hairline-rgb), 0.05), 0 6px 18px rgba(var(--hairline-rgb), 0.08);
   --glass-radius: 12px;
   --input-bg: rgba(var(--hairline-rgb), 0.03);
   --input-border: rgba(var(--hairline-rgb), 0.12);
@@ -141,6 +144,12 @@
   }
   body {
     @apply bg-background text-foreground;
+    /* Heavier default UI weight for crisper, more legible chrome text.
+       Explicit font-weight utilities (font-semibold, etc.) still override. */
+    font-weight: 460;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    letter-spacing: -0.01em;
   }
 }
 
@@ -148,8 +157,10 @@
    border, and a soft diffuse shadow (depth via shadow + layering, not glow). */
 .glass-card {
   background: var(--glass-bg);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  /* Light blur only — the surface is a near-opaque light gray, so we no longer
+     over-saturate the backdrop (which was reading as dark/muddy). */
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--glass-border);
   border-radius: var(--glass-radius);
   padding: 12px;
@@ -227,14 +238,14 @@
   font-family: var(--font-mono);
 }
 
-/* Accessibility: floor the dense metadata sizes so nothing is sub-12px. */
+/* Accessibility: floor the dense metadata sizes so nothing reads too small. */
 .text-\[8px\],
 .text-\[9px\],
 .text-\[10px\] {
-  font-size: 12px;
+  font-size: 12.5px;
 }
 .text-\[11px\] {
-  font-size: 12.5px;
+  font-size: 13px;
 }
 
 /* Visible keyboard focus on all interactive DOM controls. */

@@ -41,10 +41,6 @@ export const AGENT_SPAWN_DISTANCE = 250
 
 export const TOOL_DEDUP_WINDOW_S = 3
 
-// ─── LocalStorage keys ─────────────────────────────────────────────────────
-
-export const SOUND_PREF_KEY = 'agent-viz-sound'
-
 // ─── Mock scenario buffer ──────────────────────────────────────────────────
 
 export const MOCK_END_BUFFER_S = 8
@@ -227,18 +223,6 @@ export function getDiscoveryCardDimensions(label: string, contentLines: string[]
 
 export const TOOL_MAX_CARD_W = 160
 
-/** Blended $/M-token rate by model family (0.75 × input + 0.25 × output
- *  per-MTok pricing, the same weighting the original Sonnet-class rate used).
- *  Claude rates derive from CLAUDE_FAMILIES. Patterns are checked in order;
- *  first match wins. Matched against lower-cased model IDs. */
-export const MODEL_FAMILY_COST: ReadonlyArray<{ pattern: RegExp; rate: number }> = [
-  ...CLAUDE_FAMILIES.map(f => ({ pattern: new RegExp(`${f.name}-\\d`), rate: f.rate })),
-  { pattern: /gpt-\d/, rate: 5 }, // gpt-5.3-codex: $1.75 in / $14 out
-]
-
-/** Blended $/M-token fallback rate for unknown models (Sonnet-class) */
-export const COST_RATE = 6
-
 // ─── Agent drawing constants ────────────────────────────────────────────────
 
 export const AGENT_DRAW = {
@@ -349,40 +333,6 @@ export const TOOL_DRAW = {
   tokenFontSize: 6,
   /** Y offset for two-line card layout */
   twoLineOffset: 5,
-} as const
-
-// ─── Cost overlay drawing constants ─────────────────────────────────────────
-
-export const COST_DRAW = {
-  /** Minimum cost to display label */
-  minDisplayCost: 0.0001,
-  /** Cost pill Y offset above agent radius */
-  pillYOffset: 22,
-  pillPadding: 12,
-  pillHeight: 16,
-  pillRadius: 8,
-  /** Mini bar height below cost pill */
-  miniBarHeight: 3,
-  miniBarRadius: 1.5,
-  miniBarGap: 3,
-  miniBarMaxExtra: 10,
-  miniBarMax: 80,
-} as const
-
-export const COST_PANEL = {
-  width: 200,
-  /** X margin from right edge */
-  xMargin: 16,
-  /** Y position (below top bar) */
-  yStart: 48,
-  lineHeight: 16,
-  headerHeight: 28,
-  sectionGap: 8,
-  maxRows: 5,
-  borderRadius: 8,
-  contentPadding: 10,
-  barInset: 4,
-  barRadius: 3,
 } as const
 
 // ─── Bubble drawing constants ───────────────────────────────────────────────

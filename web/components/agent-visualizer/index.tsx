@@ -18,13 +18,13 @@ import { SessionTranscriptPanel } from "./session-transcript-panel"
 import { OpenFileProvider } from "./tool-content-renderer"
 import { stopPropagationHandlers } from "./shared-ui"
 import { TimelineEvent, TIMING } from "@/lib/agent-types"
+import { PARALLEL_VIEW_ID } from "@/lib/bridge-types"
 import { COLORS } from "@/lib/colors"
 
 import { MOCK_DURATION } from "@/lib/mock-scenario"
 import { MessageFeedPanel } from "./message-feed-panel"
 import { LegendPanel } from "./legend-panel"
 import { TopBar } from "./top-bar"
-import { useAudioEffects } from "@/hooks/use-audio-effects"
 
 export function AgentVisualizer() {
   const bridge = useVSCodeBridge()
@@ -66,22 +66,21 @@ export function AgentVisualizer() {
 
   const [showStats, setShowStats] = useState(false)
   const [showHexGrid, setShowHexGrid] = useState(false)
-  const [showCostOverlay, setShowCostOverlay] = useState(false)
   const [showTimeline, setShowTimeline] = useState(false)
   const [showFileAttention, setShowFileAttention] = useState(false)
   const [showTranscript, setShowTranscript] = useState(false)
   const [showLegend, setShowLegend] = useState(true)
 
   // Mutually exclusive panel toggling — opening one closes the others
-  const toggleExclusivePanel = useCallback((panel: 'files' | 'transcript' | 'cost') => {
+  const toggleExclusivePanel = useCallback((panel: 'files' | 'transcript') => {
     setShowFileAttention(prev => panel === 'files' ? !prev : false)
     setShowTranscript(prev => panel === 'transcript' ? !prev : false)
-    setShowCostOverlay(prev => panel === 'cost' ? !prev : false)
   }, [])
   const [zoomToFitTrigger, setZoomToFitTrigger] = useState(0)
 
   const [isReviewing, setIsReviewing] = useState(false)
-  const { isMuted, seekingRef, handleToggleMute } = useAudioEffects(agents, toolCalls, isReviewing)
+  // Tracks in-flight timeline seeks (set true during a seek, cleared after).
+  const seekingRef = useRef(false)
 
   // Auto-play on mount
   useEffect(() => {
@@ -96,9 +95,18 @@ export function AgentVisualizer() {
   const sessionCacheRef = useRef<Map<string, { snapshot: ReturnType<typeof saveSnapshot>; eventCount: number }>>(new Map())
   const prevSelectedRef = useRef<string | null>(null)
   useLayoutEffect(() => {
+    // Selection cleared (e.g. panel reset, or last session closed): drop the
+    // per-session cache and the prev marker so a subsequently re-selected id —
+    // even the same one that was selected before — still cold-starts instead of
+    // being skipped by the `!== prevSelectedRef.current` guard.
+    if (bridge.selectedSessionId === null) {
+      sessionCacheRef.current.clear()
+      prevSelectedRef.current = null
+      return
+    }
     if (bridge.selectedSessionId && bridge.selectedSessionId !== prevSelectedRef.current) {
-      // Save outgoing session state (if any)
-      if (prevSelectedRef.current !== null) {
+      // Save outgoing session state (if any). The parallel view is not cached.
+      if (prevSelectedRef.current !== null && prevSelectedRef.current !== PARALLEL_VIEW_ID) {
         sessionCacheRef.current.set(prevSelectedRef.current, {
           snapshot: saveSnapshot(),
           eventCount: bridge.getSessionEventCount(prevSelectedRef.current),
@@ -108,7 +116,11 @@ export function AgentVisualizer() {
       // Restore or cold-start the incoming session, then flush events.
       // Flushing happens HERE (after state swap) to prevent the animation
       // frame from processing events in the wrong simulation context.
-      const cached = sessionCacheRef.current.get(bridge.selectedSessionId)
+      // The parallel view is never cached — its merged event set grows as
+      // sessions receive events, so it always cold-starts from all buffers.
+      const cached = bridge.selectedSessionId === PARALLEL_VIEW_ID
+        ? undefined
+        : sessionCacheRef.current.get(bridge.selectedSessionId)
       if (cached) {
         restoreSnapshot(cached.snapshot)
         bridge.flushSessionEvents(bridge.selectedSessionId, cached.eventCount)
@@ -191,15 +203,13 @@ export function AgentVisualizer() {
     toggleTimeline: () => { setShowTimeline(prev => !prev) },
     toggleHexGrid: () => { setShowHexGrid(prev => !prev) },
     toggleStats: () => { setShowStats(prev => !prev) },
-    toggleCostOverlay: () => toggleExclusivePanel('cost'),
     zoomToFit: () => { setZoomToFitTrigger(n => n + 1) },
     clearSelection: () => { selection.clearAllSelections() },
     deselectAgent: () => { selection.clearAgent() },
     closeTranscript: () => { setShowTranscript(false) },
-    toggleMute: handleToggleMute,
     setSpeed,
     selectedAgentId: selection.selectedAgentId,
-  }), [handlePlayPause, selection.clearAllSelections, selection.clearAgent, selection.selectedAgentId, setSpeed, handleToggleMute, toggleExclusivePanel])
+  }), [handlePlayPause, selection.clearAllSelections, selection.clearAgent, selection.selectedAgentId, setSpeed, toggleExclusivePanel])
 
   useKeyboardShortcuts(keyboardActions)
 
@@ -243,21 +253,40 @@ export function AgentVisualizer() {
   ) : []
 
   const handleCloseSession = useCallback((id: string) => {
+    const remaining = bridge.sessions.filter(s => s.id !== id)
     bridge.removeSession(id)
     sessionCacheRef.current.delete(id)
-    if (bridge.selectedSessionId === id) {
-      const remaining = bridge.sessions.filter(s => s.id !== id)
+
+    if (bridge.selectedSessionId === PARALLEL_VIEW_ID) {
+      // The tab bar (which hosts the "All agents" segment) hides at ≤1 session,
+      // so a parallel view of ≤1 session would strand the user with no way out.
+      // Drop back to a concrete session in that case; otherwise stay in parallel
+      // but re-flush so the closed session's nodes leave the merged canvas.
+      if (remaining.length <= 1) {
+        bridge.selectSession(remaining.length === 1 ? remaining[0].id : null)
+        if (remaining.length === 0) restart()
+      } else {
+        restart()
+        bridge.flushSessionEvents(PARALLEL_VIEW_ID)
+      }
+    } else if (bridge.selectedSessionId === id) {
       if (remaining.length > 0) {
         bridge.selectSession(remaining[remaining.length - 1].id)
+      } else {
+        restart()
       }
     }
-  }, [bridge])
+  }, [bridge, restart])
 
   const openFile = useCallback((filePath: string, line?: number) => {
     bridge.bridgeOpenFile(filePath, line)
   }, [bridge])
 
-  const isEmpty = agents.size === 0 && !bridge.useMockData
+  // "Waiting for an agent session" should only show when there truly is no
+  // session — not during the brief window after entering the parallel view / a
+  // cold-start tab switch, where agents.size is momentarily 0 while flushed
+  // events repopulate over the next animation frames.
+  const isEmpty = agents.size === 0 && !bridge.useMockData && bridge.sessions.length === 0
 
   return (
     <OpenFileProvider value={bridge.isVSCode ? openFile : null}>
@@ -289,11 +318,10 @@ export function AgentVisualizer() {
         selectedToolCallId={selection.selectedToolCallId}
         onDiscoveryClick={selection.handleDiscoveryClick}
         selectedDiscoveryId={selection.selectedDiscoveryId}
-        showCostOverlay={showCostOverlay}
       />
 
       {/* Legend (bottom-left) — documents the visual language */}
-      <LegendPanel visible={showLegend} onClose={() => setShowLegend(false)} />
+      <LegendPanel visible={showLegend} onClose={() => setShowLegend(false)} onOpen={() => setShowLegend(true)} />
 
       {/* Message feed panel (top-left) */}
       <MessageFeedPanel
@@ -412,18 +440,16 @@ export function AgentVisualizer() {
         sessionsWithActivity={bridge.sessionsWithActivity}
         onSelectSession={bridge.selectSession}
         onCloseSession={handleCloseSession}
+        onRenameSession={bridge.renameSession}
         isVSCode={bridge.isVSCode}
         connectionStatus={bridge.connectionStatus}
         agentCount={agents.size}
         totalTokens={totalTokens}
         showFileAttention={showFileAttention}
         showTranscript={showTranscript}
-        showCostOverlay={showCostOverlay}
         showTimeline={showTimeline}
-        isMuted={isMuted}
         onTogglePanel={toggleExclusivePanel}
         onToggleTimeline={() => setShowTimeline(prev => !prev)}
-        onToggleMute={handleToggleMute}
       />
     </div>
     </OpenFileProvider>

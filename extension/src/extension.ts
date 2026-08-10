@@ -7,6 +7,8 @@ import { startCodexRuntime } from './codex-runtime'
 import { promptHookSetupIfNeeded, configureClaudeHooks, isDisable1MContext } from './hooks-config'
 import { createLogger } from './logger'
 import type { AgentRuntime, AgentRuntimeMode } from './session-runtime'
+import type { StudyStorage } from './study-storage'
+import { setupStudyStorage, revealStudyFolder, packageStudyData } from './study-vscode'
 
 const log = createLogger('Extension')
 
@@ -14,6 +16,7 @@ type ConfiguredRuntimeMode = AgentRuntimeMode | 'auto'
 
 let eventSource: JsonlEventSource | undefined
 let runtimes: AgentRuntime[] = []
+let studyStorage: StudyStorage | null = null
 
 function readConfiguredMode(): ConfiguredRuntimeMode {
   const raw = vscode.workspace.getConfiguration('agentVisualizer').get<string>('runtime', 'auto')
@@ -33,7 +36,7 @@ async function startRuntimes(
   const failures: AgentRuntimeMode[] = []
   if (mode === 'claude' || mode === 'auto') {
     log.info('Starting Claude runtime...')
-    try { runtimes.push(await startClaudeRuntime(context)) }
+    try { runtimes.push(await startClaudeRuntime(context, studyStorage ?? undefined)) }
     catch (err) { log.error('Claude runtime failed to start:', err); failures.push('claude') }
   }
   if (mode === 'codex' || mode === 'auto') {
@@ -46,6 +49,10 @@ async function startRuntimes(
 
 export async function activate(context: vscode.ExtensionContext) {
   log.info('Extension activated')
+
+  // Research capture (opt-in via setting + informed consent). Must resolve
+  // before starting runtimes so the Claude runtime can wire the sink.
+  studyStorage = await setupStudyStorage(context)
 
   const mode = readConfiguredMode()
   log.info(`Runtime mode: ${mode}`)
@@ -120,6 +127,20 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand('agentVisualizer.configureHooks', async () => {
       await configureClaudeHooks()
+    }),
+  )
+
+  // ─── Study capture commands ────────────────────────────────────────────────
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('agentVisualizer.revealStudyFolder', () => {
+      revealStudyFolder(studyStorage)
+    }),
+  )
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('agentVisualizer.packageStudyData', async () => {
+      await packageStudyData(studyStorage)
     }),
   )
 
@@ -273,6 +294,9 @@ async function handleOpenFile(filePath: string, line?: number): Promise<void> {
 
 export function deactivate(): void {
   disconnectEventSource()
+  // Flush final raw syncs before each runtime rebuilds the study index.
+  studyStorage?.dispose()
   for (const r of runtimes) r.dispose()
   runtimes = []
+  studyStorage = null
 }

@@ -120,6 +120,25 @@ pnpm run dev        # start dev server + event relay
 
 `pnpm run dev` starts both the Next.js dev server and an event relay that receives Claude Code events and streams them to the browser via SSE.
 
+These three commands are all you need — they run deterministically from a clean clone with no manual approval prompts.
+
+### Native build approvals
+
+pnpm 10+ does not run dependency build scripts unless they are explicitly approved. The event relay is bundled with `esbuild`, and the image pipeline uses `sharp`, so both are pre-approved in [`pnpm-workspace.yaml`](./pnpm-workspace.yaml):
+
+```yaml
+onlyBuiltDependencies:
+  - esbuild
+  - sharp
+allowBuilds:
+  esbuild: true
+  sharp: true
+```
+
+Because this approval is committed, `pnpm i` builds these packages automatically and `pnpm run <script>` never fails its pre-run dependency check.
+
+If you ever see `ERR_PNPM_IGNORED_BUILDS` (e.g. after pnpm rewrites the file with an unapproved placeholder), make sure `allowBuilds` lists each package with a `true` value — not the placeholder `set this to true or false` — then re-run `pnpm i`. Do **not** run the build scripts through the interactive `pnpm approve-builds` prompt; the committed config above makes that unnecessary.
+
 Other scripts:
 
 | Script | Description |

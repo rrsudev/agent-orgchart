@@ -7,12 +7,10 @@ export function useKeyboardShortcuts(actions: {
   toggleTimeline: () => void
   toggleHexGrid: () => void
   toggleStats: () => void
-  toggleCostOverlay: () => void
   zoomToFit: () => void
   clearSelection: () => void
   deselectAgent: () => void
   closeTranscript: () => void
-  toggleMute: () => void
   setSpeed: (speed: number) => void
   selectedAgentId: string | null
 }): void {
@@ -60,13 +58,6 @@ export function useKeyboardShortcuts(actions: {
         case 's':
         case 'S':
           a.toggleStats()
-          break
-        case '$':
-          a.toggleCostOverlay()
-          break
-        case 'm':
-        case 'M':
-          a.toggleMute()
           break
         case '1': a.setSpeed(0.5); break
         case '2': a.setSpeed(1); break
