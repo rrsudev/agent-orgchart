@@ -73,6 +73,8 @@ export interface TopBarProps {
   showTimeline: boolean
   onTogglePanel: (panel: 'files' | 'transcript') => void
   onToggleTimeline: () => void
+  // New agent composer
+  onNewAgent: () => void
 }
 
 export const TopBar = memo(function TopBar({
@@ -82,6 +84,7 @@ export const TopBar = memo(function TopBar({
   agentCount, totalTokens,
   showFileAttention, showTranscript, showTimeline,
   onTogglePanel, onToggleTimeline,
+  onNewAgent,
 }: TopBarProps) {
   return (
     <div className="absolute top-4 left-4 right-4 flex items-center gap-5 font-mono text-[14px] font-medium" style={{ zIndex: Z.info }}>
@@ -104,6 +107,18 @@ export const TopBar = memo(function TopBar({
 
       {/* Right-side info/controls */}
       <div className="flex items-center gap-5 flex-shrink-0" style={{ color: COLORS.textMuted }}>
+        <button
+          onClick={onNewAgent}
+          className="px-2.5 py-1 rounded transition-all"
+          style={{
+            background: COLORS.toggleActive,
+            border: `1px solid ${COLORS.holoBright}`,
+            color: COLORS.holoBright,
+          }}
+          title="Compose a command to launch a new agent"
+        >
+          + New agent
+        </button>
         {isVSCode && <ConnectionIndicator status={connectionStatus} />}
         <span>{agentCount} agents</span>
         <span>{formatTokens(totalTokens)} tokens</span>

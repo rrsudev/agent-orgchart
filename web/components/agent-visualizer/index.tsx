@@ -25,6 +25,7 @@ import { MOCK_DURATION } from "@/lib/mock-scenario"
 import { MessageFeedPanel } from "./message-feed-panel"
 import { LegendPanel } from "./legend-panel"
 import { TopBar } from "./top-bar"
+import { PromptComposerPanel } from "./prompt-composer-panel"
 
 export function AgentVisualizer() {
   const bridge = useVSCodeBridge()
@@ -70,6 +71,7 @@ export function AgentVisualizer() {
   const [showFileAttention, setShowFileAttention] = useState(false)
   const [showTranscript, setShowTranscript] = useState(false)
   const [showLegend, setShowLegend] = useState(true)
+  const [showComposer, setShowComposer] = useState(false)
 
   // Mutually exclusive panel toggling — opening one closes the others
   const toggleExclusivePanel = useCallback((panel: 'files' | 'transcript') => {
@@ -450,6 +452,13 @@ export function AgentVisualizer() {
         showTimeline={showTimeline}
         onTogglePanel={toggleExclusivePanel}
         onToggleTimeline={() => setShowTimeline(prev => !prev)}
+        onNewAgent={() => setShowComposer(true)}
+      />
+
+      {/* Prompt composer: build a `claude` command to launch a new agent */}
+      <PromptComposerPanel
+        visible={showComposer}
+        onClose={() => setShowComposer(false)}
       />
     </div>
     </OpenFileProvider>
