@@ -443,6 +443,8 @@ export function AgentVisualizer() {
         onSelectSession={bridge.selectSession}
         onCloseSession={handleCloseSession}
         onRenameSession={bridge.renameSession}
+        archivedSessions={bridge.archivedSessions}
+        onReopenSession={bridge.unarchiveSession}
         isVSCode={bridge.isVSCode}
         connectionStatus={bridge.connectionStatus}
         agentCount={agents.size}

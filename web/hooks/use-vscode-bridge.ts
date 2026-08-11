@@ -84,10 +84,14 @@ interface BridgeHookResult {
   selectedSessionIdRef: React.RefObject<string | null>
   /** Session IDs that have received events while not selected */
   sessionsWithActivity: Set<string>
-  /** Remove a session from the list */
+  /** Remove (archive) a session from the list */
   removeSession: (sessionId: string) => void
   /** Rename a session tab (persists locally; blank name reverts to bridge label) */
   renameSession: (sessionId: string, label: string) => void
+  /** Archived (closed) sessions, oldest→newest, for the reopen/undo UI */
+  archivedSessions: SessionInfo[]
+  /** Reopen a previously archived session (undo a close) */
+  unarchiveSession: (sessionId: string) => void
 }
 
 /**
@@ -152,6 +156,40 @@ export function useVSCodeBridge(): BridgeHookResult {
     }
   }
 
+  // Archived (closed) sessions, keyed by id in archive order (insertion order of
+  // a Map is preserved). Persisted so a closed tab stays closed across reloads,
+  // and stored with full SessionInfo so it can be reopened (undo). Their event
+  // buffers are intentionally KEPT so a reopened tab restores its full state.
+  const ARCHIVED_KEY = 'agent-orgchart:archived-sessions'
+  const archivedRef = useRef<Map<string, SessionInfo>>(new Map())
+  const archivedLoadedRef = useRef(false)
+  if (!archivedLoadedRef.current) {
+    archivedLoadedRef.current = true
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = window.localStorage.getItem(ARCHIVED_KEY)
+        if (raw) archivedRef.current = new Map((JSON.parse(raw) as SessionInfo[]).map(s => [s.id, s]))
+      } catch { /* ignore malformed storage */ }
+    }
+  }
+  // State mirror of the archive (ref is for synchronous reads inside event
+  // handlers; state drives the "reopen" UI). Kept in sync via syncArchived().
+  // NOTE: starts empty on both server and first client render — populating it
+  // from localStorage happens AFTER mount (below) to avoid an SSR/client
+  // hydration mismatch (the ref, which is not rendered, can load synchronously).
+  const [archivedSessions, setArchivedSessions] = useState<SessionInfo[]>([])
+  useEffect(() => {
+    if (archivedRef.current.size > 0) setArchivedSessions([...archivedRef.current.values()])
+  }, [])
+  const syncArchived = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage.setItem(ARCHIVED_KEY, JSON.stringify([...archivedRef.current.values()]))
+      } catch { /* ignore quota/availability errors */ }
+    }
+    setArchivedSessions([...archivedRef.current.values()])
+  }, [])
+
   /** Overlay any user rename onto a session's bridge-provided label. */
   const withCustomLabel = useCallback((s: SessionInfo): SessionInfo => {
     const custom = customLabelsRef.current.get(s.id)
@@ -214,12 +252,28 @@ export function useVSCodeBridge(): BridgeHookResult {
         sessionId: event.sessionId,
       }
 
-      // Always buffer by session (for replay on session switch)
+      // TEMP DIAGNOSTIC (subagents-not-showing): log spawn/dispatch events so we
+      // can see whether subagent agent_spawn events (parent set, isMain absent)
+      // actually reach the app, and with what sessionId. Remove once resolved.
+      if (event.type === 'agent_spawn' || event.type === 'subagent_dispatch' || event.type === 'subagent_return') {
+        const p = event.payload as Record<string, unknown>
+        console.debug(
+          `[subagent-debug] ${event.type}`,
+          { name: p.name, parent: p.parent, child: p.child, isMain: p.isMain, sessionId: event.sessionId },
+        )
+      }
+
+      // Always buffer by session (for replay on session switch — and so an
+      // archived session can be fully restored when reopened).
       if (event.sessionId) {
         const buf = sessionEventsRef.current.get(event.sessionId) || []
         buf.push(simEvent)
         sessionEventsRef.current.set(event.sessionId, buf)
       }
+
+      // Archived (closed) sessions are buffered above but otherwise hidden: no
+      // delivery, no activity dot, no re-add. They stay closed until reopened.
+      if (event.sessionId && archivedRef.current.has(event.sessionId)) return
 
       // Deliver to pending if session matches (ref is always current).
       // In parallel view (sentinel) every session's events are delivered.
@@ -287,7 +341,10 @@ export function useVSCodeBridge(): BridgeHookResult {
         return
       }
       if (type === 'list') {
-        const sessionList = (data as SessionInfo[]).map(withCustomLabel)
+        // Drop archived (closed) sessions so they don't reappear on reload.
+        const sessionList = (data as SessionInfo[])
+          .filter(s => !archivedRef.current.has(s.id))
+          .map(withCustomLabel)
         setSessions(sessionList)
         // Auto-select: prefer active sessions, then most recently active.
         // Only set selection — useLayoutEffect handles flushing events.
@@ -306,6 +363,9 @@ export function useVSCodeBridge(): BridgeHookResult {
         }
       } else if (type === 'started') {
         const session = withCustomLabel(data as SessionInfo)
+        // A user archived (closed) this session — keep it hidden even if it
+        // starts/resumes again.
+        if (archivedRef.current.has(session.id)) return
         setSessions(prev => {
           const existing = prev.find(s => s.id === session.id)
           if (existing) {
@@ -389,6 +449,8 @@ export function useVSCodeBridge(): BridgeHookResult {
     // original receive order (the same order its individual-tab view replays).
     const lists: SimulationEvent[][] = []
     for (const [sessionId, buf] of sessionEventsRef.current) {
+      // Archived sessions are buffered (for reopen) but excluded from the view.
+      if (archivedRef.current.has(sessionId)) continue
       const meta = parallelMetaOf(sessionId)
       lists.push(buf.map(evt => namespaceEvent(evt, meta)))
     }
@@ -436,21 +498,35 @@ export function useVSCodeBridge(): BridgeHookResult {
   const removeSession = useCallback((sessionId: string) => {
     setSessions(prev => {
       const session = prev.find(s => s.id === sessionId)
-      if (session) { dismissedSessionsRef.current.set(sessionId, session) }
+      // Archive persistently (with full info, in archive order) so the closed
+      // tab stays closed across reloads, is ignored if the bridge re-lists or
+      // the session resumes, and can be reopened later. Its event buffer is
+      // KEPT so a reopened tab restores its full state.
+      if (session) {
+        dismissedSessionsRef.current.set(sessionId, session)
+        archivedRef.current.set(sessionId, session)
+        syncArchived()
+      }
       return prev.filter(s => s.id !== sessionId)
     })
-    // Drop the closed session's buffered events so it no longer contributes
-    // ghost agents to the merged parallel view (mergedAllEvents iterates every
-    // remaining buffer). Its order index is intentionally kept so that if the
-    // session resumes it lands back in the same spot.
-    sessionEventsRef.current.delete(sessionId)
     setSessionsWithActivity(prev => {
       if (!prev.has(sessionId)) return prev
       const next = new Set(prev)
       next.delete(sessionId)
       return next
     })
-  }, [])
+  }, [syncArchived])
+
+  /** Reopen a previously archived (closed) session. Un-archives it, restores its
+   *  tab, and selects it — its kept buffer cold-starts to restore full state. */
+  const unarchiveSession = useCallback((sessionId: string) => {
+    const info = archivedRef.current.get(sessionId)
+    if (!info) return
+    archivedRef.current.delete(sessionId)
+    syncArchived()
+    setSessions(prev => prev.some(s => s.id === sessionId) ? prev : [...prev, withCustomLabel(info)])
+    selectSession(sessionId)
+  }, [syncArchived, withCustomLabel, selectSession])
 
   /** Rename a session tab. Persists locally and overrides the bridge label.
    *  An empty/blank name clears the override (reverts to the bridge label). */
@@ -494,5 +570,7 @@ export function useVSCodeBridge(): BridgeHookResult {
     sessionsWithActivity,
     removeSession,
     renameSession,
+    archivedSessions,
+    unarchiveSession,
   }
 }

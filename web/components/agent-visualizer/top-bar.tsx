@@ -61,6 +61,9 @@ export interface TopBarProps {
   onSelectSession: (id: string) => void
   onCloseSession: (id: string) => void
   onRenameSession: (id: string, label: string) => void
+  // Archived (closed) sessions + reopen (undo)
+  archivedSessions: SessionInfo[]
+  onReopenSession: (id: string) => void
   // Connection
   isVSCode: boolean
   connectionStatus: ConnectionStatus
@@ -80,17 +83,20 @@ export interface TopBarProps {
 export const TopBar = memo(function TopBar({
   sessions, selectedSessionId, sessionsWithActivity,
   onSelectSession, onCloseSession, onRenameSession,
+  archivedSessions, onReopenSession,
   isVSCode, connectionStatus,
   agentCount, totalTokens,
   showFileAttention, showTranscript, showTimeline,
   onTogglePanel, onToggleTimeline,
   onNewAgent,
 }: TopBarProps) {
+  // Most-recently archived session — clicking "Reopen" undoes closes one by one.
+  const lastArchived = archivedSessions.length > 0 ? archivedSessions[archivedSessions.length - 1] : null
   return (
     <div className="absolute top-4 left-4 right-4 flex items-center gap-5 font-mono text-[14px] font-medium" style={{ zIndex: Z.info }}>
       {/* Session tabs — scrollable, takes available space */}
       {sessions.length > 1 && (
-        <div className="min-w-0 flex-shrink overflow-x-auto scrollbar-hide">
+        <div className="min-w-0 flex-shrink">
           <SessionTabs
             sessions={sessions}
             selectedSessionId={selectedSessionId}
@@ -107,6 +113,21 @@ export const TopBar = memo(function TopBar({
 
       {/* Right-side info/controls */}
       <div className="flex items-center gap-5 flex-shrink-0" style={{ color: COLORS.textMuted }}>
+        {lastArchived && (
+          <button
+            onClick={() => onReopenSession(lastArchived.id)}
+            className="px-2.5 py-1 rounded transition-all flex items-center gap-1.5"
+            style={{
+              background: COLORS.toggleInactive,
+              border: `1px solid ${COLORS.toggleBorder}`,
+              color: COLORS.textDim,
+            }}
+            title={`Reopen "${lastArchived.label}"${archivedSessions.length > 1 ? ` (${archivedSessions.length} closed)` : ''}`}
+          >
+            <span aria-hidden="true">⤺</span>
+            Reopen{archivedSessions.length > 1 ? ` (${archivedSessions.length})` : ''}
+          </button>
+        )}
         <button
           onClick={onNewAgent}
           className="px-2.5 py-1 rounded transition-all"

@@ -4,11 +4,7 @@ import { useMemo, useRef, useState } from "react"
 import { Z } from "@/lib/agent-types"
 import { COLORS } from "@/lib/colors"
 import { useClickOutside } from "@/hooks/use-click-outside"
-import {
-  AGENT_ROLES,
-  MODEL_OPTIONS,
-  buildClaudeCommand,
-} from "@/lib/prompt-templates"
+import { MODEL_OPTIONS, buildClaudeCommand } from "@/lib/prompt-templates"
 import { GlassCard } from "./glass-card"
 import { PanelHeader, stopPropagationHandlers } from "./shared-ui"
 
@@ -16,6 +12,9 @@ import { PanelHeader, stopPropagationHandlers } from "./shared-ui"
 // Lightweight, frontend-only. Composes a `claude` command and copies it to the
 // clipboard — the user pastes it into their terminal to launch a new agent,
 // which then appears in the graph via the existing hooks. No backend channel.
+//
+// Intentionally unopinionated: the user writes whatever they want the agent to
+// do in their own words. The composer imposes no purpose, name, or framing.
 
 interface PromptComposerPanelProps {
   visible: boolean
@@ -43,22 +42,17 @@ function Label({ children }: { children: React.ReactNode }) {
 export function PromptComposerPanel({ visible, onClose }: PromptComposerPanelProps) {
   const ref = useRef<HTMLDivElement>(null)
   const [prompt, setPrompt] = useState("")
-  const [roleId, setRoleId] = useState(AGENT_ROLES[0].id)
   const [model, setModel] = useState("")
+  const [context, setContext] = useState("")
   const [cwd, setCwd] = useState("")
   const [planMode, setPlanMode] = useState(false)
   const [copied, setCopied] = useState(false)
 
   useClickOutside(ref, onClose)
 
-  const role = useMemo(
-    () => AGENT_ROLES.find((r) => r.id === roleId) ?? AGENT_ROLES[0],
-    [roleId],
-  )
-
   const command = useMemo(
-    () => buildClaudeCommand({ prompt, roleId, model, cwd, planMode }),
-    [prompt, roleId, model, cwd, planMode],
+    () => buildClaudeCommand({ prompt, model, context, cwd, planMode }),
+    [prompt, model, context, cwd, planMode],
   )
 
   const handleCopy = async () => {
@@ -92,38 +86,34 @@ export function PromptComposerPanel({ visible, onClose }: PromptComposerPanelPro
             </span>
           </PanelHeader>
 
-          {/* Role + model */}
-          <div className="flex gap-2 mt-1">
-            <div className="flex-1 min-w-0">
-              <Label>Role</Label>
-              <select
-                value={roleId}
-                onChange={(e) => setRoleId(e.target.value)}
-                className="w-full px-2 py-1.5 text-[13px] outline-none"
-                style={FIELD_STYLE}
-              >
-                {AGENT_ROLES.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="flex-1 min-w-0">
-              <Label>Model</Label>
-              <select
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-                className="w-full px-2 py-1.5 text-[13px] outline-none"
-                style={FIELD_STYLE}
-              >
-                {MODEL_OPTIONS.map((m) => (
-                  <option key={m.value} value={m.value}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+          {/* Model */}
+          <div className="mt-1">
+            <Label>Model</Label>
+            <select
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              className="w-full px-2 py-1.5 text-[13px] outline-none"
+              style={FIELD_STYLE}
+            >
+              {MODEL_OPTIONS.map((m) => (
+                <option key={m.value || "default"} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Context — optional free-form background for the agent */}
+          <div className="mt-3">
+            <Label>Context (optional)</Label>
+            <textarea
+              value={context}
+              onChange={(e) => setContext(e.target.value)}
+              placeholder="Anything the agent should know before starting…"
+              rows={2}
+              className="w-full px-2 py-1.5 text-[13px] resize-y outline-none font-mono"
+              style={FIELD_STYLE}
+            />
           </div>
 
           {/* Task */}
@@ -132,8 +122,8 @@ export function PromptComposerPanel({ visible, onClose }: PromptComposerPanelPro
             <textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder={role.placeholder}
-              rows={4}
+              placeholder="Describe what you want this agent to do, in your own words…"
+              rows={5}
               className="w-full px-2 py-1.5 text-[13px] resize-y outline-none font-mono"
               style={FIELD_STYLE}
             />

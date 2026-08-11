@@ -66,8 +66,11 @@ export function SessionTabs({
 
   return (
     // Segmented "track" that houses the tabs — mirrors macOS/Safari tab bars.
+    // The track (and the pinned "All agents" segment) keep a fixed shape; only
+    // the per-session tabs scroll horizontally inside, so the rounded frame is
+    // never cut off no matter how many tabs there are.
     <div
-      className="inline-flex items-center gap-0.5 p-1 rounded-[11px]"
+      className="flex items-center gap-0.5 p-1 rounded-[11px] max-w-full"
       style={{
         background: 'rgba(0, 0, 0, 0.045)',
         border: `1px solid ${COLORS.holoBorder08}`,
@@ -99,10 +102,12 @@ export function SessionTabs({
       {/* Divider between the parallel-view segment and the per-session tabs. */}
       <span
         aria-hidden="true"
-        className="self-center mx-0.5"
+        className="self-center mx-0.5 shrink-0"
         style={{ width: 1, height: 16, background: COLORS.holoBorder12 }}
       />
 
+      {/* Scrollable region — only the session tabs scroll; the frame stays put. */}
+      <div className="flex items-center gap-0.5 overflow-x-auto scrollbar-hide min-w-0">
       {sessions.map(session => {
         const isSelected = session.id === selectedSessionId
         const isActive = session.status === 'active'
@@ -167,6 +172,7 @@ export function SessionTabs({
           </button>
         )
       })}
+      </div>
     </div>
   )
 }
