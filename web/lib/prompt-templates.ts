@@ -48,9 +48,10 @@ export function buildClaudeCommand(opts: ComposerOptions): string {
 
   const parts: string[] = ["claude"]
 
-  // Ignore any excluded model so it can never leak into the command.
-  if (opts.model && !EXCLUDED_MODELS.has(opts.model)) {
-    parts.push("--model", opts.model)
+  // Ignore any excluded model (case-insensitively) so it can never leak in.
+  const model = opts.model?.trim()
+  if (model && !EXCLUDED_MODELS.has(model.toLowerCase())) {
+    parts.push("--model", model)
   }
   if (opts.planMode) parts.push("--permission-mode", "plan")
 

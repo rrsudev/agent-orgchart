@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Z } from "@/lib/agent-types"
 import { COLORS } from "@/lib/colors"
 import { useClickOutside } from "@/hooks/use-click-outside"
@@ -47,8 +47,14 @@ export function PromptComposerPanel({ visible, onClose }: PromptComposerPanelPro
   const [cwd, setCwd] = useState("")
   const [planMode, setPlanMode] = useState(false)
   const [copied, setCopied] = useState(false)
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useClickOutside(ref, onClose)
+
+  // Clear the "Copied ✓" timer on unmount so it can't fire after teardown.
+  useEffect(() => () => {
+    if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current)
+  }, [])
 
   const command = useMemo(
     () => buildClaudeCommand({ prompt, model, context, cwd, planMode }),
@@ -60,19 +66,21 @@ export function PromptComposerPanel({ visible, onClose }: PromptComposerPanelPro
     try {
       await navigator.clipboard.writeText(command)
       setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
+      // Reset any in-flight timer so rapid clicks don't stack or flicker.
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current)
+      copiedTimerRef.current = setTimeout(() => setCopied(false), 1500)
     } catch {
       // Clipboard API unavailable (e.g. insecure context) — leave the command
       // visible so the user can select and copy it manually.
     }
   }
 
-  if (!visible) return null
-
   return (
     <div
       className="absolute inset-0 flex items-center justify-center"
-      style={{ zIndex: Z.detailCard }}
+      // Let GlassCard own the fade in/out; when hidden the overlay must not
+      // capture clicks meant for the canvas beneath it.
+      style={{ zIndex: Z.detailCard, pointerEvents: visible ? "auto" : "none" }}
       {...stopPropagationHandlers}
     >
       <div ref={ref} style={{ width: 460, maxWidth: "92vw" }}>

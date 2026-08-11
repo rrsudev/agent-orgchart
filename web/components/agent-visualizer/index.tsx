@@ -81,8 +81,6 @@ export function AgentVisualizer() {
   const [zoomToFitTrigger, setZoomToFitTrigger] = useState(0)
 
   const [isReviewing, setIsReviewing] = useState(false)
-  // Tracks in-flight timeline seeks (set true during a seek, cleared after).
-  const seekingRef = useRef(false)
 
   // Auto-play on mount
   useEffect(() => {
@@ -130,6 +128,11 @@ export function AgentVisualizer() {
         restart()
         bridge.flushSessionEvents(bridge.selectedSessionId)
       }
+
+      // The incoming session cold-starts/restores as live (isPlaying: true), so
+      // clear Review mode — otherwise the control bar would keep showing the
+      // paused review scrubber while the new session is actually playing.
+      setIsReviewing(false)
 
       prevSelectedRef.current = bridge.selectedSessionId
     }
@@ -397,12 +400,10 @@ export function AgentVisualizer() {
         onRestart={handleRestart}
         onSpeedChange={setSpeed}
         onSeek={(time) => {
-          seekingRef.current = true
           pause()
           seekToTime(time)
           setZoomToFitTrigger(n => n + 1)
           if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current)
-          resumeTimerRef.current = setTimeout(() => { resumeTimerRef.current = null; seekingRef.current = false }, TIMING.seekCompleteDelayMs)
         }}
         timelineEvents={timelineEvents}
         isReviewing={isReviewing}

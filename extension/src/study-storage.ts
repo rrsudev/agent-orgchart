@@ -49,7 +49,7 @@ export interface StudyStorageOptions {
 /** The current on-disk schema version for study-storage. */
 const SCHEMA_VERSION = 1
 
-interface SyncedFile { size: number; mtimeMs: number }
+interface SyncedFile { hash: string }
 
 interface SessionRec {
   runtime: StudyRuntime
@@ -58,9 +58,11 @@ interface SessionRec {
   mainFilePath?: string
   /** Source sidecar dir (`<projectDir>/<sessionId>/`), holds subagents/ + tool-results/. */
   sourceSidecarDir?: string
-  /** Per-source-file stat cache so mirroring only copies changed files. */
+  /** Per-source-file content-hash cache so mirroring only copies changed files. */
   synced: Map<string, SyncedFile>
   startedAt: string
+  /** True once finalized (status=completed); a resume flips this back to active. */
+  finalized?: boolean
 }
 
 export class StudyStorage {
@@ -145,6 +147,7 @@ export class StudyStorage {
   registerClaudeSession(sessionId: string, mainFilePath: string): void {
     const rec = this.ensureSession(sessionId, 'claude')
     if (!rec) return
+    this.reactivateIfFinalized(sessionId, rec)
     rec.mainFilePath = mainFilePath
     // The sidecar dir sits next to the main file, named after the session id.
     rec.sourceSidecarDir = path.join(path.dirname(mainFilePath), sessionId)
@@ -153,7 +156,20 @@ export class StudyStorage {
 
   /** Register a Codex session (events-only in Phase 1; raw rollout mirror is deferred). */
   registerCodexSession(sessionId: string): void {
-    this.ensureSession(sessionId, 'codex')
+    const rec = this.ensureSession(sessionId, 'codex')
+    if (rec) this.reactivateIfFinalized(sessionId, rec)
+  }
+
+  /**
+   * If a resumed session was previously finalized, flip its metadata back to
+   * active and clear endedAt. Registration is the deliberate "live again" signal
+   * (stray taps must not reactivate), so this only runs from the register paths.
+   */
+  private reactivateIfFinalized(sessionId: string, rec: SessionRec): void {
+    if (!rec.finalized) return
+    rec.finalized = false
+    this.writeSessionMeta(sessionId, rec, 'active')
+    this.warn(`session ${sessionId.slice(0, 8)} resumed → active`)
   }
 
   // ─── Backfill (historical import) ────────────────────────────────────────
@@ -223,7 +239,7 @@ export class StudyStorage {
    *   transcript.jsonl  ← <projectDir>/<sessionId>.jsonl
    *   subagents/**      ← <projectDir>/<sessionId>/subagents/**
    *   tool-results/**   ← <projectDir>/<sessionId>/tool-results/**
-   * Idempotent: only files whose size or mtime changed are re-copied.
+   * Idempotent: only files whose contents changed (by hash) are re-copied.
    */
   syncClaudeSession(sessionId: string): void {
     const rec = this.sessions.get(sessionId)
@@ -238,15 +254,22 @@ export class StudyStorage {
     }
   }
 
-  /** Copy one file if it changed since last sync (keyed by source path). */
+  /**
+   * Copy one file if its contents changed since last sync (keyed by source path).
+   * Uses a full content hash rather than size+mtime: this is a research capture
+   * where fidelity beats throughput, so we accept re-reading each file every tick
+   * in exchange for never missing an in-place, same-length rewrite. Reading the
+   * buffer once (and writing that exact buffer) also avoids a stat/copy race.
+   */
   private mirrorFile(rec: SessionRec, src: string, dest: string): void {
-    let stat: fs.Stats
-    try { stat = fs.statSync(src) } catch { return }
+    let buf: Buffer
+    try { buf = fs.readFileSync(src) } catch { return }
+    const hash = crypto.createHash('sha1').update(buf).digest('hex')
     const prev = rec.synced.get(src)
-    if (prev && prev.size === stat.size && prev.mtimeMs === stat.mtimeMs) return
+    if (prev && prev.hash === hash) return
     fs.mkdirSync(path.dirname(dest), { recursive: true })
-    fs.copyFileSync(src, dest)
-    rec.synced.set(src, { size: stat.size, mtimeMs: stat.mtimeMs })
+    fs.writeFileSync(dest, buf)
+    rec.synced.set(src, { hash })
   }
 
   /** Recursively mirror a directory tree (subagents/, tool-results/, …). */
@@ -309,6 +332,7 @@ export class StudyStorage {
     if (!rec) return
     this.syncClaudeSession(sessionId)
     this.writeSessionMeta(sessionId, rec, 'completed')
+    rec.finalized = true
   }
 
   dispose(): void {
@@ -317,6 +341,7 @@ export class StudyStorage {
       try {
         this.syncClaudeSession(sessionId)
         this.writeSessionMeta(sessionId, rec, 'completed')
+        rec.finalized = true
       } catch { /* ignore on shutdown */ }
     }
   }

@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { vscodeBridge, type ConnectionStatus, type AgentEvent, type SessionInfo } from '@/lib/vscode-bridge'
 import { PARALLEL_VIEW_ID } from '@/lib/bridge-types'
+import { SimulationEvent } from '@/lib/agent-types'
 
 /** Payload fields that identify a graph node (agent/parent/child references). */
 const IDENTITY_FIELDS = ['name', 'parent', 'agent', 'child'] as const
@@ -38,24 +39,23 @@ function namespaceEvent(evt: SimulationEvent, meta?: ParallelMeta): SimulationEv
   if (!evt.sessionId) return evt
   const prefix = evt.sessionId + SESSION_SEP
   const payload: Record<string, unknown> = { ...evt.payload }
-  const isRootSpawn = evt.type === 'agent_spawn'
-    && typeof payload.name === 'string'
-    && typeof payload.parent !== 'string'
-  if (evt.type === 'agent_spawn' && typeof payload.name === 'string' && payload.displayName === undefined) {
-    payload.displayName = payload.name
-  }
-  if (isRootSpawn && meta) {
-    payload.displayName = `${payload.displayName} · ${shortSessionTag(meta.label)}`
-    const radius = ORCH_RING_STEP * Math.sqrt(meta.index)
-    payload.spawnX = Math.cos(GOLDEN_ANGLE * meta.index) * radius
-    payload.spawnY = Math.sin(GOLDEN_ANGLE * meta.index) * radius
+  if (evt.type === 'agent_spawn' && typeof payload.name === 'string') {
+    // Preserve the original name for clean node labels before namespacing.
+    if (payload.displayName === undefined) payload.displayName = payload.name
+    // A parentless root spawn is the session's orchestrator: badge it with a
+    // session tag and give it a distinct spawn position in the parallel view.
+    if (meta && typeof payload.parent !== 'string') {
+      payload.displayName = `${payload.displayName} · ${shortSessionTag(meta.label)}`
+      const radius = ORCH_RING_STEP * Math.sqrt(meta.index)
+      payload.spawnX = Math.cos(GOLDEN_ANGLE * meta.index) * radius
+      payload.spawnY = Math.sin(GOLDEN_ANGLE * meta.index) * radius
+    }
   }
   for (const field of IDENTITY_FIELDS) {
     if (typeof payload[field] === 'string') payload[field] = prefix + (payload[field] as string)
   }
   return { ...evt, payload }
 }
-import { SimulationEvent } from '@/lib/agent-types'
 
 interface BridgeHookResult {
   isVSCode: boolean
@@ -250,17 +250,6 @@ export function useVSCodeBridge(): BridgeHookResult {
         type: event.type as SimulationEvent['type'],
         payload: event.payload,
         sessionId: event.sessionId,
-      }
-
-      // TEMP DIAGNOSTIC (subagents-not-showing): log spawn/dispatch events so we
-      // can see whether subagent agent_spawn events (parent set, isMain absent)
-      // actually reach the app, and with what sessionId. Remove once resolved.
-      if (event.type === 'agent_spawn' || event.type === 'subagent_dispatch' || event.type === 'subagent_return') {
-        const p = event.payload as Record<string, unknown>
-        console.debug(
-          `[subagent-debug] ${event.type}`,
-          { name: p.name, parent: p.parent, child: p.child, isMain: p.isMain, sessionId: event.sessionId },
-        )
       }
 
       // Always buffer by session (for replay on session switch — and so an

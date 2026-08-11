@@ -84,6 +84,25 @@ test('syncClaudeSession copies only changed content (append-only growth)', () =>
   assert.equal(copied.trim().split('\n').length, 2, 'both lines mirrored')
 })
 
+test('syncClaudeSession re-mirrors a same-length in-place rewrite (content hash, not size+mtime)', () => {
+  const { workspace, projectDir, sessionId, mainFile, storage } = scaffold()
+  storage.registerClaudeSession(sessionId, mainFile)
+  storage.syncClaudeSession(sessionId)
+
+  const srcToolResult = path.join(projectDir, sessionId, 'tool-results', 'xyz.txt')
+  const destToolResult = path.join(sessionDir(workspace, sessionId), 'tool-results', 'xyz.txt')
+  const before = fs.statSync(srcToolResult)
+  assert.equal(fs.readFileSync(destToolResult, 'utf-8'), 'big tool output', 'initial content mirrored')
+
+  // Rewrite in place to a DIFFERENT string of the SAME byte length. A size-based
+  // guard would treat this as unchanged; the content hash must still catch it.
+  fs.writeFileSync(srcToolResult, 'new tool output') // same 15-byte length
+  assert.equal(fs.statSync(srcToolResult).size, before.size, 'size unchanged by rewrite')
+
+  storage.syncClaudeSession(sessionId)
+  assert.equal(fs.readFileSync(destToolResult, 'utf-8'), 'new tool output', 'changed content re-mirrored')
+})
+
 test('appendEvent writes for registered sessions and skips unknown ones', () => {
   const { workspace, sessionId, mainFile, storage } = scaffold()
   storage.registerClaudeSession(sessionId, mainFile)
@@ -120,4 +139,23 @@ test('finalizeSession marks completed with an endedAt', () => {
   const meta = JSON.parse(fs.readFileSync(path.join(sessionDir(workspace, sessionId), 'session.json'), 'utf-8'))
   assert.equal(meta.status, 'completed')
   assert.ok(typeof meta.endedAt === 'string', 'endedAt set')
+})
+
+test('resuming a finalized session flips status back to active and clears endedAt', () => {
+  const { workspace, sessionId, mainFile, storage } = scaffold()
+  const metaPath = path.join(sessionDir(workspace, sessionId), 'session.json')
+
+  storage.registerClaudeSession(sessionId, mainFile)
+  const started = JSON.parse(fs.readFileSync(metaPath, 'utf-8')).startedAt
+
+  storage.finalizeSession(sessionId)
+  assert.equal(JSON.parse(fs.readFileSync(metaPath, 'utf-8')).status, 'completed')
+
+  // Watcher re-registers the same session on resume.
+  storage.registerClaudeSession(sessionId, mainFile)
+
+  const resumed = JSON.parse(fs.readFileSync(metaPath, 'utf-8'))
+  assert.equal(resumed.status, 'active', 'status flipped back to active')
+  assert.equal(resumed.endedAt, null, 'endedAt cleared')
+  assert.equal(resumed.startedAt, started, 'original startedAt preserved')
 })

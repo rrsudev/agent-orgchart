@@ -3,7 +3,7 @@
   "scripts": {
     "setup": "node scripts/setup.js",
     "dev": "NEXT_PUBLIC_DEMO=0 NEXT_PUBLIC_RELAY_PORT=3001 concurrently -n relay,web -c blue,green \"pnpm run dev:relay\" \"pnpm run dev:web\"",
-    "dev:relay": "node scripts/build-relay.js && node scripts/.dev-relay.js",
+    "dev:relay": "node scripts/build-relay.js --watch",
     "dev:demo": "NEXT_PUBLIC_DEMO=1 pnpm run dev:web",
     "dev:web": "pnpm --filter agent-flow-web run dev",
     "dev:extension": "pnpm --filter agent-flow run watch",
@@ -13,7 +13,7 @@
     "build:all": "pnpm run build:webview && pnpm run build:extension",
     "build:app": "node app/build.js",
     "study:index": "node --import tsx scripts/study-index.ts",
-    "test": "node --import tsx --test \"scripts/**/*.test.ts\" \"app/src/**/*.test.ts\""
+    "test": "node --import tsx --test \"scripts/**/*.test.ts\" \"app/src/**/*.test.ts\" \"web/**/*.test.ts\""
   },
   "devDependencies": {
     "concurrently": "^9.2.1",
