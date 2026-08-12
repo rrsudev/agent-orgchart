@@ -357,10 +357,32 @@ export function useAgentSimulation(options: UseAgentSimulationOptions = {}) {
   const updateAgentPosition = useCallback((agentId: string, x: number, y: number) => {
     // Drag updates — write to frameRef only (canvas reads it, no React render)
     const prev = frameRef.current
+    const agent = prev.agents.get(agentId)
+    if (!agent) return
+    const dx = x - agent.x
+    const dy = y - agent.y
     const newAgents = new Map(prev.agents)
-    const agent = newAgents.get(agentId)
-    if (agent) newAgents.set(agentId, { ...agent, x, y, pinned: true })
-    frameRef.current = { ...prev, agents: newAgents }
+    newAgents.set(agentId, { ...agent, x, y, pinned: true })
+
+    // Tool cards and discoveries belong to this agent (via agentId) but are
+    // positioned in absolute coordinates, so shift them by the same delta —
+    // otherwise dragging the node would leave its cards behind. Discoveries move
+    // their target too so any in-flight animation stays relative to the node.
+    let toolCalls = prev.toolCalls
+    let discoveries = prev.discoveries
+    if (dx !== 0 || dy !== 0) {
+      toolCalls = new Map(prev.toolCalls)
+      for (const [tid, tc] of toolCalls) {
+        if (tc.agentId === agentId) toolCalls.set(tid, { ...tc, x: tc.x + dx, y: tc.y + dy })
+      }
+      discoveries = prev.discoveries.map(d =>
+        d.agentId === agentId
+          ? { ...d, x: d.x + dx, y: d.y + dy, targetX: d.targetX + dx, targetY: d.targetY + dy }
+          : d,
+      )
+    }
+
+    frameRef.current = { ...prev, agents: newAgents, toolCalls, discoveries }
 
     if (forceSimRef.current) {
       const node = forceSimRef.current.nodes().find(n => n.id === agentId)

@@ -12,7 +12,7 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import { AgentEvent, SubagentState, WatchedSession, emitSubagentSpawn } from './protocol'
-import { SESSION_ID_DISPLAY, ORCHESTRATOR_NAME, generateSubagentFallbackName, resolveSubagentChildName } from './constants'
+import { SESSION_ID_DISPLAY, ORCHESTRATOR_NAME, generateSubagentFallbackName, resolveSubagentChildName, formatSubagentDisplayName } from './constants'
 import { readNewFileLines } from './fs-utils'
 import { TranscriptParser } from './transcript-parser'
 import { handlePermissionDetection, PermissionDetectionDelegate } from './permission-detection'
@@ -26,18 +26,25 @@ export interface SubagentWatcherDelegate extends PermissionDetectionDelegate {
 }
 
 /**
- * Read the .meta.json sidecar file to resolve the subagent's name.
- * Falls back to generateSubagentFallbackName if the meta file is missing or unreadable.
+ * Read the .meta.json sidecar to resolve the subagent's identity name and a
+ * friendly display label ("Explore · …"). Falls back to a generated name if the
+ * meta file is missing or unreadable.
  */
-function resolveNameFromMeta(jsonlPath: string, fallbackIndex: number): string {
+function resolveNameFromMeta(jsonlPath: string, fallbackIndex: number): { name: string; displayName: string } {
   const metaPath = jsonlPath.replace(/\.jsonl$/, '.meta.json')
   try {
     const raw = fs.readFileSync(metaPath, 'utf-8')
     const meta = JSON.parse(raw) as Record<string, unknown>
     const name = resolveSubagentChildName(meta)
-    if (name && name !== 'subagent') return name
+    if (name && name !== 'subagent') {
+      const type = typeof meta.agentType === 'string' ? meta.agentType
+        : typeof meta.subagent_type === 'string' ? meta.subagent_type : undefined
+      const description = typeof meta.description === 'string' ? meta.description : undefined
+      return { name, displayName: formatSubagentDisplayName(type, description) }
+    }
   } catch { /* meta file may not exist for older Claude Code versions */ }
-  return generateSubagentFallbackName('', fallbackIndex)
+  const fallback = generateSubagentFallbackName('', fallbackIndex)
+  return { name: fallback, displayName: fallback }
 }
 
 /** Scan the subagents directory for new JSONL files and start tailing them */
@@ -82,13 +89,14 @@ function startWatchingSubagentFile(
   if (!session) return
 
   // Resolve name from the meta file (deterministic, no queue race)
-  const agentName = resolveNameFromMeta(filePath, session.subagentWatchers.size + 1)
-  log.info(`Tailing subagent: ${path.basename(filePath)} as "${agentName}" (session ${sessionId.slice(0, SESSION_ID_DISPLAY)})`)
+  const { name: agentName, displayName } = resolveNameFromMeta(filePath, session.subagentWatchers.size + 1)
+  log.info(`Tailing subagent: ${path.basename(filePath)} as "${displayName}" (session ${sessionId.slice(0, SESSION_ID_DISPLAY)})`)
 
   const state: SubagentState = {
     watcher: null,
     fileSize: 0,
     agentName,
+    displayName,
     pendingToolCalls: new Map(),
     seenToolUseIds: new Set(),
     permissionTimer: null,
@@ -131,7 +139,7 @@ function startWatchingSubagentFile(
   state.spawnEmitted = pendingToolUseIds.size > 0 || alreadySpawned
   if (pendingToolUseIds.size > 0 && !alreadySpawned) {
     session.spawnedSubagents.add(agentName)
-    emitSubagentSpawn(delegate, ORCHESTRATOR_NAME, agentName, agentName, sessionId)
+    emitSubagentSpawn(delegate, ORCHESTRATOR_NAME, agentName, agentName, sessionId, displayName)
   }
 
   // Watch for new content
@@ -172,7 +180,7 @@ export function readSubagentNewLines(
     state.spawnEmitted = true
     if (!session.spawnedSubagents.has(state.agentName)) {
       session.spawnedSubagents.add(state.agentName)
-      emitSubagentSpawn(delegate, ORCHESTRATOR_NAME, state.agentName, state.agentName, sessionId)
+      emitSubagentSpawn(delegate, ORCHESTRATOR_NAME, state.agentName, state.agentName, sessionId, state.displayName)
     }
   }
 

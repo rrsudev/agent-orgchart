@@ -1,45 +1,64 @@
 'use client'
 
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
-import { Agent, Z, type AgentState } from '@/lib/agent-types'
-import { COLORS, ROLE_COLORS, getStateColor } from '@/lib/colors'
+import { useState, useRef, useMemo, useCallback } from 'react'
+import { Agent, Z } from '@/lib/agent-types'
+import { COLORS, ROLE_COLORS } from '@/lib/colors'
 import type { ConversationMessage } from '@/hooks/simulation/types'
 import { useClickOutside } from '@/hooks/use-click-outside'
 import { useVirtualList } from '@/hooks/use-virtual-list'
+import { useAutoScroll } from '@/hooks/use-auto-scroll'
+import { TranscriptMessage } from './transcript-message'
+
+// Only text messages count toward the collapsed "latest message" pill.
+const TEXT_TYPES = new Set(['assistant', 'user', 'thinking'])
+const COLLAPSED_AGENT_NAME_MAX = 16
+const PREVIEW_MAX = 50
+const GAP = 8
+
+type Mode = 'global' | 'active'
 
 interface MessageFeedPanelProps {
   conversations: Map<string, ConversationMessage[]>
   agents: Map<string, Agent>
   onAgentClick: (agentId: string | null) => void
   selectedAgentId: string | null
+  /** Runtime of the current session — picks the assistant label (CLAUDE/CODEX). */
+  runtime?: 'claude' | 'codex'
+  /** Controlled open/collapsed state (driven by the top bar + `c` shortcut). */
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  /** Controlled sub-tab: Global (full session transcript) vs Active (one agent). */
+  mode: Mode
+  onModeChange: (mode: Mode) => void
 }
 
-// Only show text messages (assistant, user, thinking) — tool calls visible via agent selection
-const TEXT_TYPES = new Set(['assistant', 'user', 'thinking'])
-
-// Truncation limits for compact display
-const COLLAPSED_AGENT_NAME_MAX = 12
-const TAB_AGENT_NAME_MAX = 14
-const PREVIEW_MAX = 50
-const MESSAGE_TRUNCATE_MAX = 120
-
-const MESSAGE_GAP = 4
-
-// ─── Main component ─────────────────────────────────────────────────────────
-
+/**
+ * The single conversation surface. One sub-tab toggle switches between:
+ *   • Global — the full session transcript: every agent's messages AND tool
+ *     calls merged chronologically, searchable (this replaces the old separate
+ *     Transcript panel).
+ *   • Active — the selected agent's own thread.
+ * Collapsed, it shows a one-line pill with the latest message.
+ */
 export function MessageFeedPanel({
   conversations,
   agents,
   onAgentClick,
   selectedAgentId,
+  runtime,
+  open,
+  onOpenChange,
+  mode,
+  onModeChange,
 }: MessageFeedPanelProps) {
-  const [expanded, setExpanded] = useState(false)
-  const [activeTab, setActiveTab] = useState<string>('all')
-  const [unread, setUnread] = useState<Set<string>>(new Set())
   const logRef = useRef<HTMLDivElement>(null)
-  const prevCountRef = useRef(0)
   const agentsRef = useRef(agents)
   agentsRef.current = agents
+
+  const [searchQuery, setSearchQuery] = useState('')
+  const [showSearch, setShowSearch] = useState(false)
+
+  const multiAgent = agents.size > 1
 
   // Stable key that only changes when agent set membership or names change
   const agentKey = useMemo(() => {
@@ -48,7 +67,7 @@ export function MessageFeedPanel({
     return parts.sort().join('|')
   }, [agents])
 
-  // ── Latest message (cheap — used by collapsed view) ──
+  // ── Latest message across all agents (collapsed pill) ──
   const latestMessage = useMemo(() => {
     const currentAgents = agentsRef.current
     let latest: (ConversationMessage & { agentId: string }) | null = null
@@ -56,9 +75,7 @@ export function MessageFeedPanel({
       if (!currentAgents.has(agentId)) continue
       for (let i = msgs.length - 1; i >= 0; i--) {
         if (!TEXT_TYPES.has(msgs[i].type)) continue
-        if (!latest || msgs[i].timestamp > latest.timestamp) {
-          latest = { ...msgs[i], agentId }
-        }
+        if (!latest || msgs[i].timestamp > latest.timestamp) latest = { ...msgs[i], agentId }
         break
       }
     }
@@ -66,123 +83,43 @@ export function MessageFeedPanel({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversations, agentKey])
 
-  // ── Expensive memos — only compute when expanded ──
-
-  const agentsWithMessages = useMemo(() => {
-    if (!expanded) return []
+  // ── Global: full session transcript (all message types, merged) ──
+  const sessionMessages = useMemo(() => {
+    if (!open || mode !== 'global') return []
     const currentAgents = agentsRef.current
-    const ids: string[] = []
+    const all: (ConversationMessage & { agentId: string })[] = []
     for (const [agentId, msgs] of conversations) {
       if (!currentAgents.has(agentId)) continue
-      if (msgs.some(m => TEXT_TYPES.has(m.type))) ids.push(agentId)
+      for (const m of msgs) all.push({ ...m, agentId })
     }
-    return ids.sort((a, b) => {
-      const agA = currentAgents.get(a)
-      const agB = currentAgents.get(b)
-      if (agA?.isMain) return -1
-      if (agB?.isMain) return 1
-      return (agA?.name ?? a).localeCompare(agB?.name ?? b)
-    })
+    all.sort((a, b) => a.timestamp - b.timestamp)
+    if (!searchQuery.trim()) return all
+    const q = searchQuery.toLowerCase()
+    return all.filter(m => m.content.toLowerCase().includes(q) || (m.toolName || '').toLowerCase().includes(q))
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expanded ? conversations : null, expanded, agentKey])
+  }, [open, mode, conversations, agentKey, searchQuery])
 
-  // Incremental message cache
-  const messagesCacheRef = useRef<{
-    key: string
-    counts: Map<string, number>
-    result: (ConversationMessage & { agentId: string })[]
-  }>({ key: '', counts: new Map(), result: [] })
+  const { visibleItems, totalHeight, offsetTop, handleScroll, measureRef } =
+    useVirtualList(sessionMessages, logRef, { gap: GAP, autoScroll: true })
 
-  const messages = useMemo(() => {
-    if (!expanded) return []
-    const currentAgents = agentsRef.current
-    const cache = messagesCacheRef.current
-    const cacheKey = `${activeTab}:${agentKey}`
-
-    if (cache.key !== cacheKey) {
-      cache.key = cacheKey
-      cache.counts = new Map()
-      cache.result = []
-    }
-
-    if (activeTab === 'all') {
-      let appended = false
-      for (const [agentId, msgs] of conversations) {
-        if (!currentAgents.has(agentId)) continue
-        const prevLen = cache.counts.get(agentId) ?? 0
-        if (msgs.length > prevLen) {
-          for (let i = prevLen; i < msgs.length; i++) {
-            if (TEXT_TYPES.has(msgs[i].type)) cache.result.push({ ...msgs[i], agentId })
-          }
-          cache.counts.set(agentId, msgs.length)
-          appended = true
-        }
-      }
-      if (appended) cache.result.sort((a, b) => a.timestamp - b.timestamp)
-      return cache.result
-    }
-
-    const msgs = conversations.get(activeTab) ?? []
-    const prevLen = cache.counts.get(activeTab) ?? 0
-    if (msgs.length > prevLen) {
-      for (let i = prevLen; i < msgs.length; i++) {
-        if (TEXT_TYPES.has(msgs[i].type)) cache.result.push({ ...msgs[i], agentId: activeTab })
-      }
-      cache.counts.set(activeTab, msgs.length)
-    }
-    return cache.result
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expanded ? conversations : null, expanded, activeTab, agentKey])
-
-  // Virtual list with auto-scroll
-  const {
-    visibleItems, totalHeight, offsetTop,
-    handleScroll, measureRef,
-  } = useVirtualList(messages, logRef, { gap: MESSAGE_GAP, autoScroll: true })
-
-  // Track unread messages per agent tab
-  useEffect(() => {
-    const totalCount = Array.from(conversations.values()).reduce((n, msgs) => n + msgs.length, 0)
-    if (totalCount > prevCountRef.current && expanded) {
-      for (const [agentId, msgs] of conversations) {
-        if (agentId !== activeTab && activeTab !== 'all' && msgs.length > 0) {
-          setUnread(prev => new Set(prev).add(agentId))
-        }
-      }
-    }
-    prevCountRef.current = totalCount
-  }, [conversations, expanded, activeTab])
-
-  useEffect(() => {
-    if (activeTab !== 'all') {
-      setUnread(prev => { const next = new Set(prev); next.delete(activeTab); return next })
-    } else {
-      setUnread(new Set())
-    }
-  }, [activeTab])
-
-  useEffect(() => {
-    if (activeTab !== 'all' && !conversations.has(activeTab)) setActiveTab('all')
-  }, [conversations, activeTab])
-
-  useEffect(() => {
-    if (selectedAgentId) {
-      const selected = agentsRef.current.get(selectedAgentId)
-      if (selected && !selected.isMain) setActiveTab(selectedAgentId)
-      else setActiveTab('all')
-    } else {
-      setActiveTab('all')
-    }
-  }, [selectedAgentId])
+  // ── Active: selected agent's own thread ──
+  const selectedAgent = selectedAgentId ? agents.get(selectedAgentId) : null
+  const activeConversation = useMemo(
+    () => (mode === 'active' && selectedAgentId ? conversations.get(selectedAgentId) ?? [] : []),
+    [mode, selectedAgentId, conversations],
+  )
+  const { ref: activeLogRef } = useAutoScroll(activeConversation.length, open && mode === 'active')
 
   const panelRef = useRef<HTMLDivElement>(null)
-  const collapsePanel = useCallback(() => setExpanded(false), [])
-  useClickOutside(panelRef, collapsePanel)
+  const collapse = useCallback(() => onOpenChange(false), [onOpenChange])
+  useClickOutside(panelRef, collapse)
 
-  if (!latestMessage && agentsWithMessages.length === 0) return null
+  const labelFor = (a?: Agent) => ((a?.runtime ?? runtime) === 'codex' ? 'CODEX' : 'CLAUDE')
 
-  // ── Collapsed ──
-  if (!expanded) {
+  if (!latestMessage && agents.size === 0) return null
+
+  // ── Collapsed pill ──
+  if (!open) {
     if (!latestMessage) return null
     const agent = agents.get(latestMessage.agentId)
     const agentName = agent?.name ?? latestMessage.agentId
@@ -193,15 +130,15 @@ export function MessageFeedPanel({
       <div
         className="absolute cursor-pointer transition-all hover:scale-[1.02] flex justify-end"
         style={{ top: 66, right: 12, zIndex: Z.info, pointerEvents: 'auto' }}
-        onClick={() => setExpanded(true)}
+        onClick={() => onOpenChange(true)}
       >
         <div className="glass-card px-3 py-2 flex items-center gap-2" style={{ maxWidth: 320 }}>
           <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: role.text }} />
           <span className="text-[9px] font-mono font-semibold shrink-0" style={{ color: COLORS.textPrimary }}>
-            {agentName.length > COLLAPSED_AGENT_NAME_MAX ? agentName.slice(0, COLLAPSED_AGENT_NAME_MAX) + '..' : agentName}
+            {agentName.length > COLLAPSED_AGENT_NAME_MAX ? agentName.slice(0, COLLAPSED_AGENT_NAME_MAX) + '…' : agentName}
           </span>
           <span className="text-[9px] font-mono truncate" style={{ color: role.text + 'cc' }}>
-            {preview}{latestMessage.content.length > PREVIEW_MAX ? '...' : ''}
+            {preview}{latestMessage.content.length > PREVIEW_MAX ? '…' : ''}
           </span>
           <span className="text-[9px] shrink-0" style={{ color: COLORS.textMuted }}>▾</span>
         </div>
@@ -209,7 +146,7 @@ export function MessageFeedPanel({
     )
   }
 
-  // ── Expanded (virtualized) ──
+  // ── Expanded: Global (transcript) / Active (thread) ──
   return (
     <div
       ref={panelRef}
@@ -217,176 +154,131 @@ export function MessageFeedPanel({
       style={{ top: 66, right: 12, zIndex: Z.info, pointerEvents: 'auto' }}
       onClick={(e) => e.stopPropagation()}
     >
-      <div className="glass-card flex flex-col" style={{ width: 320, maxHeight: 420 }}>
-        {/* Header */}
-        <div className="flex items-center justify-between px-3 pt-2 pb-1">
-          <span className="text-[10px] font-mono font-semibold tracking-wider" style={{ color: COLORS.textPrimary }}>
-            MESSAGES
-          </span>
-          <button
-            onClick={() => setExpanded(false)}
-            className="text-[9px] transition-colors"
-            style={{ color: COLORS.textMuted }}
-          >
-            ▴
-          </button>
+      <div className="glass-card flex flex-col" style={{ width: 340, maxHeight: 460 }}>
+        {/* Header: sub-tabs + (global) search + collapse */}
+        <div className="flex items-center justify-between px-2 pt-2 pb-1.5 gap-2">
+          <div className="flex gap-0.5 min-w-0">
+            <SubTab label="Global" active={mode === 'global'} onClick={() => onModeChange('global')} />
+            <SubTab
+              label={selectedAgent ? `Active · ${selectedAgent.name}` : 'Active'}
+              active={mode === 'active'}
+              disabled={!selectedAgentId}
+              onClick={() => selectedAgentId && onModeChange('active')}
+            />
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            {mode === 'global' && (
+              <button
+                onClick={() => { setShowSearch(s => !s); if (showSearch) setSearchQuery('') }}
+                className="text-[10px] font-mono px-1.5 py-0.5 rounded transition-all"
+                style={{ background: showSearch ? COLORS.toggleActive : 'transparent', color: showSearch ? COLORS.assistantText : COLORS.textMuted }}
+                title="Search the transcript"
+              >
+                /
+              </button>
+            )}
+            <button onClick={() => onOpenChange(false)} className="text-[9px] px-1 transition-colors" style={{ color: COLORS.textMuted }}>▴</button>
+          </div>
         </div>
 
-        {/* Agent Tabs (hidden when only 1 agent) */}
-        {agentsWithMessages.length > 1 && (
-        <div className="flex gap-0.5 px-2 pb-1.5 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
-          <TabButton
-            label="All"
-            active={activeTab === 'all'}
-            onClick={() => setActiveTab('all')}
-            color={COLORS.holoBase}
-          />
-          {agentsWithMessages.map(agentId => {
-            const agent = agents.get(agentId)
-            const name = agent?.name ?? agentId
-            const color = agent ? getStateColor(agent.state) : COLORS.idle
-            return (
-              <TabButton
-                key={agentId}
-                label={name.length > TAB_AGENT_NAME_MAX ? name.slice(0, TAB_AGENT_NAME_MAX) + '..' : name}
-                active={activeTab === agentId}
-                onClick={() => setActiveTab(agentId)}
-                color={color}
-                hasUnread={unread.has(agentId)}
-              />
-            )
-          })}
-        </div>
+        {/* Global search bar */}
+        {mode === 'global' && showSearch && (
+          <div className="px-2 pb-1.5" style={{ borderBottom: `1px solid ${COLORS.holoBorder06}` }}>
+            <input
+              autoFocus
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Escape') { setShowSearch(false); setSearchQuery('') } e.stopPropagation() }}
+              placeholder="Filter transcript…"
+              className="w-full px-2 py-1 rounded text-[10px] font-mono outline-none"
+              style={{ background: COLORS.holoBg05, border: `1px solid ${COLORS.holoBorder12}`, color: COLORS.assistantText }}
+            />
+          </div>
         )}
 
-        {/* Message List (virtualized) */}
-        <div
-          ref={logRef}
-          onScroll={handleScroll}
-          className="flex-1 overflow-y-auto px-2 pb-2"
-          style={{ maxHeight: 340, scrollbarWidth: 'thin', scrollbarColor: `${COLORS.scrollbarThumb} transparent` }}
-        >
-          {messages.length === 0 ? (
-            <div className="flex items-center justify-center py-6">
-              <span className="text-[9px] font-mono" style={{ color: COLORS.textMuted }}>
-                No messages yet
-              </span>
-            </div>
-          ) : (
-            <div style={{ height: totalHeight, position: 'relative' }}>
-              <div style={{ position: 'absolute', top: offsetTop, left: 0, right: 0 }}>
-                {visibleItems.map((msg) => (
-                  <div
-                    key={msg.id}
-                    ref={(el) => measureRef(msg.id, el)}
-                    style={{ marginBottom: MESSAGE_GAP }}
-                  >
-                    <MessageRow
-                      message={msg}
-                      agentId={msg.agentId}
-                      agentName={agents.get(msg.agentId)?.name ?? msg.agentId}
-                      showAgent={activeTab === 'all'}
-                      isSelected={selectedAgentId === msg.agentId}
-                      onClick={() => { onAgentClick(msg.agentId); setExpanded(false) }}
-                      runtime={agents.get(msg.agentId)?.runtime}
-                    />
-                  </div>
-                ))}
+        {/* Body */}
+        {mode === 'global' ? (
+          <div
+            ref={logRef}
+            onScroll={handleScroll}
+            className="flex-1 overflow-y-auto px-2 py-2"
+            style={{ maxHeight: 380, scrollbarWidth: 'thin', scrollbarColor: `${COLORS.scrollbarThumb} transparent` }}
+          >
+            {sessionMessages.length === 0 ? (
+              <EmptyHint text={searchQuery ? 'No matching messages' : 'Waiting for session activity…'} />
+            ) : (
+              <div style={{ height: totalHeight, position: 'relative' }}>
+                <div style={{ position: 'absolute', top: offsetTop, left: 0, right: 0 }}>
+                  {visibleItems.map((msg) => {
+                    const agent = agents.get(msg.agentId)
+                    return (
+                      <div key={msg.id} ref={(el) => measureRef(msg.id, el)} style={{ marginBottom: GAP }}>
+                        {multiAgent && (
+                          <button
+                            onClick={() => onAgentClick(msg.agentId)}
+                            className="text-[8px] font-mono mb-0.5 px-1 rounded transition-colors hover:underline"
+                            style={{ color: COLORS.textMuted }}
+                          >
+                            {agent?.name ?? msg.agentId}
+                          </button>
+                        )}
+                        <TranscriptMessage message={msg} searchQuery={searchQuery} assistantLabel={labelFor(agent)} />
+                      </div>
+                    )
+                  })}
+                </div>
               </div>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        ) : (
+          <div
+            ref={activeLogRef}
+            className="flex-1 overflow-y-auto space-y-1.5 px-2 py-2"
+            style={{ maxHeight: 380, scrollbarWidth: 'thin', scrollbarColor: `${COLORS.scrollbarThumb} transparent` }}
+          >
+            {!selectedAgent ? (
+              <EmptyHint text="Select an agent to view its thread" />
+            ) : activeConversation.length === 0 ? (
+              <EmptyHint text="No messages yet" />
+            ) : (
+              activeConversation.map((msg) => (
+                <TranscriptMessage key={msg.id} message={msg} assistantLabel={labelFor(selectedAgent)} />
+              ))
+            )}
+          </div>
+        )}
       </div>
     </div>
   )
 }
 
-// ── Tab Button ──
-
-function TabButton({ label, active, onClick, color, hasUnread }: {
+function SubTab({ label, active, onClick, disabled }: {
   label: string
   active: boolean
   onClick: () => void
-  color: string
-  hasUnread?: boolean
+  disabled?: boolean
 }) {
   return (
     <button
       onClick={onClick}
-      className="px-2 py-0.5 rounded text-[9px] font-mono transition-all shrink-0 relative"
+      disabled={disabled}
+      className="px-2 py-0.5 rounded text-[10px] font-mono font-semibold tracking-wider transition-all shrink-0 max-w-[180px] truncate"
       style={{
-        background: active ? color + '20' : 'transparent',
-        color: active ? color : COLORS.textMuted,
-        border: active ? `1px solid ${color}30` : '1px solid transparent',
+        background: active ? COLORS.holoBase + '20' : 'transparent',
+        color: disabled ? COLORS.textMuted + '80' : active ? COLORS.holoBase : COLORS.textMuted,
+        border: active ? `1px solid ${COLORS.holoBase}30` : '1px solid transparent',
+        cursor: disabled ? 'default' : 'pointer',
       }}
     >
-      {label}
-      {hasUnread && (
-        <span
-          className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full"
-          style={{ background: COLORS.unreadDot }}
-        />
-      )}
+      {label.toUpperCase()}
     </button>
   )
 }
 
-// ── Message Row ──
-
-function MessageRow({ message, agentId, agentName, showAgent, isSelected, onClick, runtime }: {
-  message: ConversationMessage
-  agentId: string
-  agentName: string
-  showAgent: boolean
-  isSelected: boolean
-  onClick: () => void
-  runtime?: Agent['runtime']
-}) {
-  const [expanded, setExpanded] = useState(false)
-  const role = ROLE_COLORS[message.type] ?? ROLE_COLORS.assistant
-  const roleLabel = message.type === 'assistant' && runtime === 'codex' ? 'CODEX' : role.label
-  const isLong = message.content.length > MESSAGE_TRUNCATE_MAX
-  const displayText = expanded || !isLong ? message.content : message.content.slice(0, MESSAGE_TRUNCATE_MAX) + '...'
-
+function EmptyHint({ text }: { text: string }) {
   return (
-    <div
-      className="rounded px-2 py-1.5 cursor-pointer transition-all"
-      style={{
-        background: isSelected ? role.bgSelected : role.bg,
-        borderLeft: isSelected ? `2px solid ${role.text}` : '2px solid transparent',
-      }}
-      onClick={onClick}
-    >
-      {/* Header row */}
-      <div className="flex items-center gap-1.5 mb-0.5">
-        <span className="text-[9px] font-mono font-semibold" style={{ color: role.text + '90' }}>
-          {roleLabel}
-        </span>
-        {showAgent && (
-          <span className="text-[9px] font-mono" style={{ color: COLORS.textMuted }}>
-            {agentName}
-          </span>
-        )}
-      </div>
-
-      {/* Content */}
-      <div
-        className="text-[9px] font-mono leading-relaxed whitespace-pre-wrap break-words"
-        style={{ color: role.text }}
-      >
-        {displayText}
-      </div>
-
-      {/* Expand/collapse for long messages */}
-      {isLong && (
-        <button
-          className="text-[9px] font-mono mt-0.5 transition-colors"
-          style={{ color: COLORS.textMuted }}
-          onClick={(e) => { e.stopPropagation(); setExpanded(prev => !prev) }}
-        >
-          {expanded ? '▴ less' : '▾ more'}
-        </button>
-      )}
+    <div className="flex items-center justify-center py-6">
+      <span className="text-[9px] font-mono" style={{ color: COLORS.textMuted }}>{text}</span>
     </div>
   )
 }

@@ -5,19 +5,21 @@ import { useAgentSimulation } from "@/hooks/use-agent-simulation"
 import { useVSCodeBridge } from "@/hooks/use-vscode-bridge"
 import { useSelectionState } from "@/hooks/use-selection-state"
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts"
+import { useAgentColors, agentColorKey, AGENT_KEY_SEP } from "@/hooks/use-agent-colors"
+import { useAgentNames } from "@/hooks/use-agent-names"
 import { AgentCanvas } from "./canvas"
 import { ControlBar } from "./control-bar"
 import { AgentDetailCard } from "./agent-detail-card"
 import { GlassContextMenu } from "./glass-context-menu"
+import { AgentColorSwatches } from "./agent-color-swatches"
+// AgentChatPanel was merged into MessageFeedPanel (Global / Active sub-tabs).
 import { ToolDetailPopup } from "./tool-detail-popup"
 import { DiscoveryDetailPopup } from "./discovery-detail-popup"
 import { FileAttentionPanel } from "./file-attention-panel"
 import { TimelinePanel } from "./timeline-panel"
-import { AgentChatPanel } from "./chat-panel"
-import { SessionTranscriptPanel } from "./session-transcript-panel"
 import { OpenFileProvider } from "./tool-content-renderer"
 import { stopPropagationHandlers } from "./shared-ui"
-import { TimelineEvent, TIMING } from "@/lib/agent-types"
+import { TimelineEvent, TIMING, Z } from "@/lib/agent-types"
 import { PARALLEL_VIEW_ID } from "@/lib/bridge-types"
 import { COLORS } from "@/lib/colors"
 
@@ -65,19 +67,96 @@ export function AgentVisualizer() {
 
   const selection = useSelectionState({ agents, toolCalls, discoveries })
 
+  // User identity colors (persisted). Build a per-view map keyed by the canvas
+  // agent id so drawAgents can look colors up directly. Resolution: an agent's
+  // OWN color always wins; a subagent with no color of its own inherits its
+  // orchestrator's color, so a session reads as one color group unless the user
+  // deliberately recolors a child.
+  const { colors: agentColorStore, setAgentColor } = useAgentColors()
+  const agentColors = useMemo(() => {
+    const sessionOf = (id: string) =>
+      id.includes(AGENT_KEY_SEP) ? id.split(AGENT_KEY_SEP)[0] : (bridge.selectedSessionId ?? '')
+
+    // First pass: each session's main-agent (orchestrator) explicit color.
+    const orchestratorColorBySession = new Map<string, string>()
+    for (const [id, agent] of agents) {
+      if (!agent.isMain) continue
+      const own = agentColorStore.get(agentColorKey(bridge.selectedSessionId, id))
+      if (own) orchestratorColorBySession.set(sessionOf(id), own)
+    }
+
+    // Second pass: resolve every agent (own color, else inherited for subagents).
+    const m = new Map<string, string>()
+    for (const [id, agent] of agents) {
+      const own = agentColorStore.get(agentColorKey(bridge.selectedSessionId, id))
+      if (own) { m.set(id, own); continue }
+      if (!agent.isMain) {
+        const inherited = orchestratorColorBySession.get(sessionOf(id))
+        if (inherited) m.set(id, inherited)
+      }
+    }
+    return m
+  }, [agents, agentColorStore, bridge.selectedSessionId])
+
+  // Effective display names: custom rename wins; else the main agent shows its
+  // session label (which the extension derives from ai-title / cleaned prompt);
+  // subagents fall through to the extension-provided name (Type · description).
+  const { names: agentNameStore, setAgentName } = useAgentNames()
+  const sessionLabelById = useMemo(
+    () => new Map(bridge.sessions.map(s => [s.id, s.label] as const)),
+    [bridge.sessions],
+  )
+  const nameOverrides = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const [id, agent] of agents) {
+      const custom = agentNameStore.get(agentColorKey(bridge.selectedSessionId, id))
+      if (custom) { m.set(id, custom); continue }
+      if (agent.isMain) {
+        const sid = id.includes(AGENT_KEY_SEP) ? id.split(AGENT_KEY_SEP)[0] : bridge.selectedSessionId
+        const label = sid ? sessionLabelById.get(sid) : undefined
+        if (label) m.set(id, label)
+      }
+    }
+    return m
+  }, [agents, agentNameStore, bridge.selectedSessionId, sessionLabelById])
+
+  // Agents with names overlaid — used by the React panels (canvas gets the map).
+  const displayAgents = useMemo(() => {
+    if (nameOverrides.size === 0) return agents
+    const m = new Map(agents)
+    for (const [id, name] of nameOverrides) {
+      const a = m.get(id)
+      if (a) m.set(id, { ...a, name })
+    }
+    return m
+  }, [agents, nameOverrides])
+
+  // Inline rename overlay (double-click a node, or the context-menu item).
+  const [renaming, setRenaming] = useState<{ agentId: string; x: number; y: number } | null>(null)
+  const commitRename = useCallback((value: string) => {
+    setRenaming(r => {
+      if (r) setAgentName(agentColorKey(bridge.selectedSessionId, r.agentId), value)
+      return null
+    })
+  }, [setAgentName, bridge.selectedSessionId])
+
   const [showStats, setShowStats] = useState(false)
   const [showHexGrid, setShowHexGrid] = useState(false)
   const [showTimeline, setShowTimeline] = useState(false)
   const [showFileAttention, setShowFileAttention] = useState(false)
-  const [showTranscript, setShowTranscript] = useState(false)
   const [showLegend, setShowLegend] = useState(true)
   const [showComposer, setShowComposer] = useState(false)
 
-  // Mutually exclusive panel toggling — opening one closes the others
-  const toggleExclusivePanel = useCallback((panel: 'files' | 'transcript') => {
-    setShowFileAttention(prev => panel === 'files' ? !prev : false)
-    setShowTranscript(prev => panel === 'transcript' ? !prev : false)
-  }, [])
+  // Unified conversation panel: Global (full session transcript) / Active thread.
+  const [chatOpen, setChatOpen] = useState(false)
+  const [chatMode, setChatMode] = useState<'global' | 'active'>('global')
+  const toggleFiles = useCallback(() => setShowFileAttention(prev => !prev), [])
+  const toggleChat = useCallback(() => { setChatOpen(o => !o); setChatMode('global') }, [])
+
+  // Selecting an agent node opens the conversation panel on that agent's thread.
+  useEffect(() => {
+    if (selection.selectedAgentId) { setChatOpen(true); setChatMode('active') }
+  }, [selection.selectedAgentId])
   const [zoomToFitTrigger, setZoomToFitTrigger] = useState(0)
 
   const [isReviewing, setIsReviewing] = useState(false)
@@ -203,29 +282,23 @@ export function AgentVisualizer() {
   // Keyboard shortcuts
   const keyboardActions = useMemo(() => ({
     togglePlayPause: handlePlayPause,
-    toggleFilePanel: () => toggleExclusivePanel('files'),
-    toggleTranscript: () => toggleExclusivePanel('transcript'),
+    toggleFilePanel: toggleFiles,
+    toggleChat,
     toggleTimeline: () => { setShowTimeline(prev => !prev) },
     toggleHexGrid: () => { setShowHexGrid(prev => !prev) },
     toggleStats: () => { setShowStats(prev => !prev) },
     zoomToFit: () => { setZoomToFitTrigger(n => n + 1) },
     clearSelection: () => { selection.clearAllSelections() },
     deselectAgent: () => { selection.clearAgent() },
-    closeTranscript: () => { setShowTranscript(false) },
+    closeChat: () => { setChatOpen(false) },
     setSpeed,
     selectedAgentId: selection.selectedAgentId,
-  }), [handlePlayPause, selection.clearAllSelections, selection.clearAgent, selection.selectedAgentId, setSpeed, toggleExclusivePanel])
+  }), [handlePlayPause, selection.clearAllSelections, selection.clearAgent, selection.selectedAgentId, setSpeed, toggleFiles, toggleChat])
 
   useKeyboardShortcuts(keyboardActions)
 
-  const totalTokens = useMemo(() => {
-    let sum = 0
-    for (const a of agents.values()) sum += a.tokensUsed
-    return sum
-  }, [agents])
 
-  const selectedAgent = selection.selectedAgentId ? agents.get(selection.selectedAgentId) : null
-  const selectedConversation = selection.selectedAgentId ? (conversations.get(selection.selectedAgentId) || []) : []
+  const selectedAgent = selection.selectedAgentId ? displayAgents.get(selection.selectedAgentId) : null
 
   // Session runtime — drives the assistant label (CLAUDE vs CODEX) in transcript panels
   const sessionRuntime = useMemo(() => {
@@ -235,17 +308,28 @@ export function AgentVisualizer() {
     return 'claude' as const
   }, [agents])
 
-  // Session-wide conversation (all agents merged chronologically)
-  // Only compute when the transcript panel is visible to avoid O(n log n) sort every frame
-  const sessionConversation = useMemo(() => {
-    if (!showTranscript) return []
-    const all = Array.from(conversations.values()).flat()
-    return all.sort((a, b) => a.timestamp - b.timestamp)
-  }, [conversations, showTranscript])
-
   // Context menu items
   const contextMenuItems = selection.contextMenu ? (
     selection.contextMenu.agentId ? [
+      {
+        node: (
+          <AgentColorSwatches
+            selected={agentColorStore.get(agentColorKey(bridge.selectedSessionId, selection.contextMenu.agentId))}
+            onPick={(hex) => {
+              setAgentColor(agentColorKey(bridge.selectedSessionId, selection.contextMenu!.agentId!), hex)
+              selection.setContextMenu(null)
+            }}
+          />
+        ),
+      },
+      { separator: true },
+      {
+        label: '✎  Rename',
+        onClick: () => {
+          const cm = selection.contextMenu
+          if (cm?.agentId) setRenaming({ agentId: cm.agentId, x: cm.x, y: cm.y })
+        },
+      },
       { label: '📊  Toggle Stats', onClick: () => setShowStats(prev => !prev) },
     ] : [
       { label: '🔍  Zoom to Fit', onClick: () => setZoomToFitTrigger(n => n + 1) },
@@ -323,17 +407,25 @@ export function AgentVisualizer() {
         selectedToolCallId={selection.selectedToolCallId}
         onDiscoveryClick={selection.handleDiscoveryClick}
         selectedDiscoveryId={selection.selectedDiscoveryId}
+        agentColors={agentColors}
+        agentNames={nameOverrides}
+        onAgentDoubleClick={(agentId, x, y) => setRenaming({ agentId, x, y })}
       />
 
       {/* Legend (bottom-left) — documents the visual language */}
       <LegendPanel visible={showLegend} onClose={() => setShowLegend(false)} onOpen={() => setShowLegend(true)} />
 
-      {/* Message feed panel (top-left) */}
+      {/* Unified conversation panel (top-right): Global transcript / Active thread */}
       <MessageFeedPanel
         conversations={conversations}
-        agents={agents}
+        agents={displayAgents}
         onAgentClick={selection.handleAgentClick}
         selectedAgentId={selection.selectedAgentId}
+        runtime={sessionRuntime}
+        open={chatOpen}
+        onOpenChange={setChatOpen}
+        mode={chatMode}
+        onModeChange={setChatMode}
       />
 
       {/* Agent detail card (floating, tethered to node) */}
@@ -368,16 +460,6 @@ export function AgentVisualizer() {
         </div>
       )}
 
-      {/* Chat panel (bottom-right, shown when agent selected) */}
-      <AgentChatPanel
-        visible={!!selectedAgent}
-        agentName={selectedAgent?.name ?? ''}
-        agentState={selectedAgent?.state ?? 'idle'}
-        conversation={selectedConversation}
-        runtime={selectedAgent?.runtime ?? sessionRuntime}
-        onClose={selection.clearAgent}
-      />
-
       {/* Context menu */}
       {selection.contextMenu && (
         <GlassContextMenu
@@ -385,6 +467,34 @@ export function AgentVisualizer() {
           items={contextMenuItems}
           onClose={() => selection.setContextMenu(null)}
         />
+      )}
+
+      {/* Inline agent rename (double-click a node, or context-menu → Rename) */}
+      {renaming && (
+        <div
+          {...stopPropagationHandlers}
+          style={{ position: 'fixed', left: renaming.x, top: renaming.y, zIndex: Z.contextMenu }}
+        >
+          <input
+            autoFocus
+            defaultValue={nameOverrides.get(renaming.agentId) ?? displayAgents.get(renaming.agentId)?.name ?? ''}
+            placeholder="Agent name"
+            onFocus={(e) => e.currentTarget.select()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commitRename(e.currentTarget.value)
+              else if (e.key === 'Escape') setRenaming(null)
+            }}
+            onBlur={(e) => commitRename(e.currentTarget.value)}
+            className="rounded-md px-2 py-1 text-[12px] outline-none"
+            style={{
+              minWidth: 160,
+              background: COLORS.glassBg,
+              border: `1px solid ${COLORS.tabSelectedBorder}`,
+              color: COLORS.textPrimary,
+              boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
+            }}
+          />
+        </div>
       )}
 
       {/* Floating control strip */}
@@ -420,14 +530,6 @@ export function AgentVisualizer() {
         onOpenFile={bridge.isVSCode ? openFile : undefined}
       />
 
-      {/* Session transcript panel (slide-in from right) */}
-      <SessionTranscriptPanel
-        visible={showTranscript}
-        conversation={sessionConversation}
-        runtime={sessionRuntime}
-        onClose={() => setShowTranscript(false)}
-      />
-
       {/* Timeline panel (slide-in from bottom) */}
       <TimelinePanel
         visible={showTimeline}
@@ -449,11 +551,11 @@ export function AgentVisualizer() {
         isVSCode={bridge.isVSCode}
         connectionStatus={bridge.connectionStatus}
         agentCount={agents.size}
-        totalTokens={totalTokens}
         showFileAttention={showFileAttention}
-        showTranscript={showTranscript}
+        showChat={chatOpen}
         showTimeline={showTimeline}
-        onTogglePanel={toggleExclusivePanel}
+        onToggleFiles={toggleFiles}
+        onToggleChat={toggleChat}
         onToggleTimeline={() => setShowTimeline(prev => !prev)}
         onNewAgent={() => setShowComposer(true)}
       />

@@ -13,7 +13,6 @@ import {
 import { readFileChunk } from './fs-utils'
 import {
   PREVIEW_MAX, ARGS_MAX, RESULT_MAX, MESSAGE_MAX,
-  SESSION_LABEL_MAX, SESSION_LABEL_TRUNCATED,
   CHILD_NAME_MAX,
   HASH_PREFIX_MAX,
   ORCHESTRATOR_NAME,
@@ -21,6 +20,8 @@ import {
   SYSTEM_CONTENT_PREFIXES,
   generateSubagentFallbackName,
   resolveSubagentChildName,
+  truncateWords,
+  formatSubagentDisplayName,
 } from './constants'
 import { summarizeInput, summarizeResult, extractInputData, detectError, buildDiscovery } from './tool-summarizer'
 import { estimateTokensFromContent, estimateTokensFromText } from './token-estimator'
@@ -114,6 +115,14 @@ export class TranscriptParser {
     // Handle inline subagent progress events (newer Claude Code versions)
     if (parsed.type === 'progress') {
       this.handleProgressEvent(parsed, sessionId)
+      return
+    }
+
+    // Claude Code writes an AI-generated session title — the best default name.
+    if (parsed.type === 'ai-title') {
+      if (sessionId && typeof parsed.aiTitle === 'string') {
+        this.setSessionLabelFromAiTitle(parsed.aiTitle, sessionId)
+      }
       return
     }
 
@@ -285,12 +294,15 @@ export class TranscriptParser {
     // Check if this is a subagent call (Task in older Claude Code, Agent in newer versions)
     if (toolName === 'Task' || toolName === 'Agent') {
       const childName = resolveSubagentChildName(block.input)
+      const subagentType = typeof block.input.subagent_type === 'string' ? block.input.subagent_type : undefined
+      const description = typeof block.input.description === 'string' ? block.input.description : undefined
+      const displayName = formatSubagentDisplayName(subagentType, description)
       this.subagentChildNames.set(block.id, childName)
       // Only emit spawn once per subagent name (file watcher may have already spawned it)
       const session = sessionId ? this.delegate.getSession(sessionId) : undefined
       if (!session?.spawnedSubagents.has(childName)) {
         session?.spawnedSubagents.add(childName)
-        emitSubagentSpawn(this.delegate, agentName, childName, args, sessionId)
+        emitSubagentSpawn(this.delegate, agentName, childName, args, sessionId, displayName)
       }
     }
 
@@ -557,6 +569,21 @@ export class TranscriptParser {
     }
   }
 
+  /** Set the session label from Claude's AI-generated title. This wins over the
+   *  first-user-message fallback, and renames both the tab and the main node. */
+  setSessionLabelFromAiTitle(aiTitle: string, sessionId: string): void {
+    const title = aiTitle.trim()
+    if (!title) return
+    const session = this.delegate.getSession(sessionId)
+    if (!session) return
+    const label = truncateWords(title, SESSION_LABEL_WORD_MAX)
+    if (session.label === label && session.labelFromAiTitle) return
+    session.label = label
+    session.labelSet = true
+    session.labelFromAiTitle = true
+    this.delegate.fireSessionLifecycle({ type: 'updated', sessionId, label })
+  }
+
   /** Extract a human-readable label from the first user message in transcript entries */
   extractSessionLabel(entries: TranscriptEntry[], session: WatchedSession): void {
     if (session.labelSet) return
@@ -596,17 +623,17 @@ export class TranscriptParser {
     return SYSTEM_CONTENT_PREFIXES.some(prefix => text.startsWith(prefix))
   }
 
-  /** Truncate to first line, max chars — fits in a tab */
+  /** Truncate to first line on a word boundary with a single ellipsis. */
   truncateLabel(text: string): string {
-    const firstLine = text.split('\n')[0].trim()
-    if (firstLine.length <= SESSION_LABEL_MAX) return firstLine
-    return firstLine.slice(0, SESSION_LABEL_TRUNCATED) + '..'
+    const firstLine = text.split('\n')[0]
+    return truncateWords(firstLine, SESSION_LABEL_WORD_MAX)
   }
 
-  /** Update session label on first user message and notify the webview */
+  /** Update session label on first user message and notify the webview.
+   *  Skips if an AI title already claimed the label. */
   maybeSetSessionLabel(entry: TranscriptEntry, sessionId: string): void {
     const session = this.delegate.getSession(sessionId)
-    if (!session || session.labelSet) return
+    if (!session || session.labelSet || session.labelFromAiTitle) return
     if (entry.type !== 'user') return
     const text = this.extractUserMessageText(entry)
     if (!text) return
@@ -615,3 +642,7 @@ export class TranscriptParser {
     this.delegate.fireSessionLifecycle({ type: 'updated', sessionId, label: session.label })
   }
 }
+
+/** Max words for session/main-agent labels — kept short so tabs and nodes don't
+ *  overfill. */
+const SESSION_LABEL_WORD_MAX = 3

@@ -1,5 +1,5 @@
 import { Agent, NODE, ANIM, AgentState } from '@/lib/agent-types'
-import { COLORS, getStateColor, contextSegments } from '@/lib/colors'
+import { COLORS, getStateColor, contextSegments, washOverWhite } from '@/lib/colors'
 import {
   AGENT_DRAW, CONTEXT_BAR, CONTEXT_RING, STATS_OVERLAY, NODE_DRAW, CANVAS_FONT, PREFERS_REDUCED_MOTION,
 } from '@/lib/canvas-constants'
@@ -200,19 +200,20 @@ function getAgentColor(id: string, target: string, dt: number): string {
 
 function drawNodeCard(
   ctx: CanvasRenderingContext2D,
-  agent: Agent, half: number, color: string,
+  agent: Agent, half: number, color: string, cardFill: string,
   isHovered: boolean, isSelected: boolean, isWaiting: boolean, time: number,
 ) {
   const emphasis = isHovered || isSelected
   const radius = half * NODE_DRAW.cornerScale
 
-  // Single soft elevation shadow behind a solid white card.
+  // Single soft elevation shadow behind a solid card. Fill is white by default,
+  // or a soft wash of the user's identity color when one is assigned.
   ctx.save()
   ctx.shadowColor = emphasis ? NODE_DRAW.shadowColorEmphasis : NODE_DRAW.shadowColor
   ctx.shadowBlur = emphasis ? NODE_DRAW.shadowBlurEmphasis : NODE_DRAW.shadowBlur
   ctx.shadowOffsetY = NODE_DRAW.shadowOffsetY
   drawSquircle(ctx, agent.x, agent.y, half, radius)
-  ctx.fillStyle = '#ffffff'
+  ctx.fillStyle = cardFill
   ctx.fill()
   ctx.restore()
 
@@ -322,14 +323,14 @@ function drawStateBadge(
   drawStateGlyph(ctx, bx, by, br * 0.55, agent.state, time)
 }
 
-function drawAgentLabel(ctx: CanvasRenderingContext2D, agent: Agent, half: number, isHovered: boolean) {
+function drawAgentLabel(ctx: CanvasRenderingContext2D, agent: Agent, half: number, isHovered: boolean, name: string) {
   ctx.fillStyle = isHovered ? COLORS.textPrimary : COLORS.textDim
   // Type carries hierarchy through weight + size, on the system stack.
   ctx.font = `600 12px ${CANVAS_FONT.sans}`
   ctx.textAlign = 'center'
   ctx.textBaseline = 'top'
   const maxLabelW = half * 3
-  const agentLabel = truncateText(ctx, agent.name, maxLabelW)
+  const agentLabel = truncateText(ctx, name, maxLabelW)
   ctx.fillText(agentLabel, agent.x, agent.y + half + AGENT_DRAW.labelYOffset)
 }
 
@@ -356,6 +357,8 @@ export function drawAgents(
   hoveredAgentId: string | null,
   showStats: boolean,
   time: number,
+  agentColors?: Map<string, string>,
+  agentNames?: Map<string, string>,
 ) {
   const dt = Math.min(0.1, Math.max(0, time - lastColorTime))
   lastColorTime = time
@@ -363,6 +366,10 @@ export function drawAgents(
   for (const [id, agent] of agents) {
     const radius = agent.isMain ? NODE.radiusMain : NODE.radiusSub
     const color = getAgentColor(id, getStateColor(agent.state), dt)
+    // User identity color → soft card-fill wash (orthogonal to the state color).
+    const userColor = agentColors?.get(id)
+    const label = agentNames?.get(id) ?? agent.name
+    const cardFill = userColor ? washOverWhite(userColor, 0.18) : '#ffffff'
     const isHovered = id === hoveredAgentId
     const isSelected = id === selectedAgentId
     const isWaiting = agent.state === 'waiting_permission'
@@ -381,10 +388,10 @@ export function drawAgents(
     ctx.save()
     ctx.globalAlpha = agent.opacity
 
-    drawNodeCard(ctx, agent, half, color, isHovered, isSelected, isWaiting, time)
+    drawNodeCard(ctx, agent, half, color, cardFill, isHovered, isSelected, isWaiting, time)
     drawAgentBrand(ctx, agent.x, agent.y, half * 2.2, COLORS.textPrimary, agent.runtime)
     drawStateBadge(ctx, agent, radius, half, color, time)
-    drawAgentLabel(ctx, agent, half, isHovered)
+    drawAgentLabel(ctx, agent, half, isHovered, label)
 
     // Context composition — ring for main agent, bar for all
     if (agent.state !== 'complete' || agent.opacity > 0.5) {

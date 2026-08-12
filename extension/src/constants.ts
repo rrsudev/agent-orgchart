@@ -192,9 +192,42 @@ export function generateSubagentFallbackName(id: string, index: number): string 
 }
 
 /** Extract a child agent name from a tool_use input block (Agent or Task tool).
- *  Used by both live processing and prescan to avoid duplicating the extraction logic. */
+ *  Used by both live processing and prescan to avoid duplicating the extraction logic.
+ *  This is the stable IDENTITY name (map key); the friendlier label is built by
+ *  {@link formatSubagentDisplayName}. */
 export function resolveSubagentChildName(input: Record<string, unknown>): string {
   return String(input.description || input.subagent_type || 'subagent').slice(0, CHILD_NAME_MAX)
+}
+
+/** Keep at most the first `maxWords` words, appending a single ellipsis (…) when
+ *  truncated. Collapses whitespace first. Never cuts mid-word, never a
+ *  double-dot. Returns the whole string when it already fits. */
+export function truncateWords(text: string, maxWords: number): string {
+  const words = text.replace(/\s+/g, ' ').trim().split(' ').filter(Boolean)
+  if (words.length <= maxWords) return words.join(' ')
+  return words.slice(0, maxWords).join(' ') + '…'
+}
+
+/** Title-case an agent type slug: 'general-purpose' → 'General Purpose'. */
+export function titleCaseAgentType(type: string): string {
+  return type
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ')
+}
+
+/** Build a subagent's friendly DISPLAY label from its type + task description,
+ *  kept short (≤ ~3 words total): 'Explore · map event'. The type takes priority
+ *  and the description fills the remaining word budget. Falls back to whichever
+ *  piece is present. */
+export function formatSubagentDisplayName(type?: string, description?: string): string {
+  const t = type ? titleCaseAgentType(type) : ''
+  if (!description) return t || 'subagent'
+  const typeWords = t ? t.split(' ').length : 0
+  const descBudget = Math.max(1, 3 - typeWords) // always show at least one word
+  const desc = truncateWords(description, descBudget)
+  return t ? `${t} · ${desc}` : desc
 }
 
 /** Prefixes that identify system-injected content (not real user messages).

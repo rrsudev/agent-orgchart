@@ -3,7 +3,6 @@
 import { memo } from "react"
 import { Z } from "@/lib/agent-types"
 import { COLORS } from "@/lib/colors"
-import { formatTokens } from "@/lib/utils"
 import { SessionTabs } from "./session-tabs"
 import type { SessionInfo, ConnectionStatus } from "@/lib/bridge-types"
 
@@ -69,12 +68,12 @@ export interface TopBarProps {
   connectionStatus: ConnectionStatus
   // Stats
   agentCount: number
-  totalTokens: number
   // Panel toggles
   showFileAttention: boolean
-  showTranscript: boolean
+  showChat: boolean
   showTimeline: boolean
-  onTogglePanel: (panel: 'files' | 'transcript') => void
+  onToggleFiles: () => void
+  onToggleChat: () => void
   onToggleTimeline: () => void
   // New agent composer
   onNewAgent: () => void
@@ -85,9 +84,9 @@ export const TopBar = memo(function TopBar({
   onSelectSession, onCloseSession, onRenameSession,
   archivedSessions, onReopenSession,
   isVSCode, connectionStatus,
-  agentCount, totalTokens,
-  showFileAttention, showTranscript, showTimeline,
-  onTogglePanel, onToggleTimeline,
+  agentCount,
+  showFileAttention, showChat, showTimeline,
+  onToggleFiles, onToggleChat, onToggleTimeline,
   onNewAgent,
 }: TopBarProps) {
   // Most-recently archived session — clicking "Reopen" undoes closes one by one.
@@ -142,15 +141,14 @@ export const TopBar = memo(function TopBar({
         </button>
         {isVSCode && <ConnectionIndicator status={connectionStatus} />}
         <span>{agentCount} agents</span>
-        <span>{formatTokens(totalTokens)} tokens</span>
 
         {/* Mutually exclusive panel group */}
         <div className="flex items-center gap-1.5 px-1.5 py-1 rounded" style={{
           background: COLORS.holoBg03,
           border: `1px solid ${COLORS.holoBorder06}`,
         }}>
-          <ToggleButton active={showFileAttention} onClick={() => onTogglePanel('files')} style={{ background: showFileAttention ? undefined : 'transparent', border: 'none' }}>Files</ToggleButton>
-          <ToggleButton active={showTranscript} onClick={() => onTogglePanel('transcript')} style={{ background: showTranscript ? undefined : 'transparent', border: 'none' }}>Chat</ToggleButton>
+          <ToggleButton active={showFileAttention} onClick={onToggleFiles} style={{ background: showFileAttention ? undefined : 'transparent', border: 'none' }}>Files</ToggleButton>
+          <ToggleButton active={showChat} onClick={onToggleChat} style={{ background: showChat ? undefined : 'transparent', border: 'none' }}>Chat</ToggleButton>
         </div>
 
         {/* Independent toggles */}

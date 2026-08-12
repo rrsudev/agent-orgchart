@@ -47,12 +47,19 @@ interface CanvasProps {
   selectedToolCallId?: string | null
   onDiscoveryClick?: (discoveryId: string | null) => void
   selectedDiscoveryId?: string | null
+  /** User-assigned identity colors, keyed by agent id (soft card-fill wash). */
+  agentColors?: Map<string, string>
+  /** Effective display names, keyed by agent id (custom name / session label). */
+  agentNames?: Map<string, string>
+  /** Double-click on an agent node — opens inline rename at the given screen point. */
+  onAgentDoubleClick?: (agentId: string, clientX: number, clientY: number) => void
 }
 
 export function AgentCanvas({
   simulationRef,
   selectedAgentId, hoveredAgentId, showStats, showHexGrid, zoomToFitTrigger, pauseAutoFit,
   onAgentClick, onAgentHover, onAgentDrag, onContextMenu, onToolCallClick, selectedToolCallId, onDiscoveryClick, selectedDiscoveryId,
+  agentColors, agentNames, onAgentDoubleClick,
 }: CanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mainCanvasRef = useRef<HTMLCanvasElement>(null)
@@ -102,7 +109,8 @@ export function AgentCanvas({
     selectedToolCallId, selectedDiscoveryId,
     simTime: sim.currentTime, pauseAutoFit, dimensions,
     onAgentDrag, onAgentClick, onAgentHover, onContextMenu,
-    onToolCallClick, onDiscoveryClick,
+    onToolCallClick, onDiscoveryClick, onAgentDoubleClick,
+    agentColors, agentNames,
     isDragging: prev?.isDragging ?? false,
   })
   const drawPropsRef = useRef(makeDrawProps())
@@ -201,6 +209,7 @@ export function AgentCanvas({
         selectedAgentId, hoveredAgentId, showStats, showHexGrid,
         selectedToolCallId, selectedDiscoveryId,
         simTime, pauseAutoFit, dimensions, onAgentDrag,
+        agentColors, agentNames,
         isDragging,
       } = drawPropsRef.current
       const transform = transformRef.current
@@ -277,7 +286,7 @@ export function AgentCanvas({
       drawEdges(ctx, edges, agents, toolCalls, activeEdgeIds, timeRef.current)
       drawToolCalls(ctx, toolCalls, timeRef.current, selectedToolCallId)
       drawDiscoveries(ctx, discoveries, agents, selectedDiscoveryId)
-      drawAgents(ctx, agents, selectedAgentId, hoveredAgentId, showStats, timeRef.current)
+      drawAgents(ctx, agents, selectedAgentId, hoveredAgentId, showStats, timeRef.current, agentColors, agentNames)
       drawMessageBubblesWorld(ctx, agents, simTimeRef.current)
       drawParticles(ctx, particles, edgeMap, agents, toolCalls, timeRef.current)
       drawEffects(ctx, effectsRef.current)

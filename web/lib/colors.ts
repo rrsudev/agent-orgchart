@@ -292,6 +292,32 @@ export function withAlpha(rgbaBase: string, alpha: number): string {
   return `${rgbaBase} ${alpha})`
 }
 
+// ─── Agent identity palette (user color-coding) ──────────────────────────────
+// Six calm hues deliberately chosen to sit in the gaps between the semantic
+// status colors (blue/purple/amber/green/red/orange). They are applied as a
+// soft WASH of the node's (otherwise white) card fill — an identity channel that
+// is orthogonal to the state color carried by the border/badge/glyph, so it
+// never conflicts with the existing status semantics. 6-digit hex is required by
+// the card-fill blend (`washOverWhite`).
+export const AGENT_PALETTE: ReadonlyArray<{ name: string; hex: string }> = [
+  { name: 'Teal', hex: '#0d9488' },
+  { name: 'Cyan', hex: '#0e7490' },
+  { name: 'Olive', hex: '#6b8e23' },
+  { name: 'Magenta', hex: '#b5179e' },
+  { name: 'Pink', hex: '#d6336c' },
+  { name: 'Slate', hex: '#6b7280' },
+] as const
+
+/** Blend a 6-digit hex toward white and return a solid 6-digit hex.
+ *  `amount` 0 → white, 1 → the hex. Used to tint the white node card fill into a
+ *  soft identity wash without touching alpha compositing / the card shadow. */
+export function washOverWhite(hex: string, amount: number): string {
+  const n = parseInt(hex.slice(1), 16)
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255
+  const mix = (c: number) => Math.round(255 + (c - 255) * amount)
+  return '#' + [mix(r), mix(g), mix(b)].map(v => v.toString(16).padStart(2, '0')).join('')
+}
+
 /** Build the context-breakdown color segments for a given breakdown. */
 export function contextSegments(bd: ContextBreakdown) {
   return [

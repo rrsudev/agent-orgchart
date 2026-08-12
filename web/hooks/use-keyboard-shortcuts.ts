@@ -3,14 +3,14 @@ import { useEffect, useRef } from "react"
 export function useKeyboardShortcuts(actions: {
   togglePlayPause: () => void
   toggleFilePanel: () => void
-  toggleTranscript: () => void
+  toggleChat: () => void
   toggleTimeline: () => void
   toggleHexGrid: () => void
   toggleStats: () => void
   zoomToFit: () => void
   clearSelection: () => void
   deselectAgent: () => void
-  closeTranscript: () => void
+  closeChat: () => void
   setSpeed: (speed: number) => void
   selectedAgentId: string | null
 }): void {
@@ -45,11 +45,11 @@ export function useKeyboardShortcuts(actions: {
           break
         case 'Escape':
           a.clearSelection()
-          a.closeTranscript()
+          a.closeChat()
           break
         case 'c':
         case 'C':
-          a.toggleTranscript()
+          a.toggleChat()
           break
         case 'g':
         case 'G':

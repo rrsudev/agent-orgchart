@@ -128,6 +128,7 @@ export function emitSubagentSpawn(
   child: string,
   task: string,
   sessionId?: string,
+  displayName?: string,
 ): void {
   emitter.emit({
     time: emitter.elapsed(sessionId),
@@ -137,7 +138,9 @@ export function emitSubagentSpawn(
   emitter.emit({
     time: emitter.elapsed(sessionId),
     type: 'agent_spawn',
-    payload: { name: child, parent, task },
+    // `name` is the stable identity/key; `displayName` is the friendly label
+    // (e.g. "Explore · map the event flow"). The webview shows displayName.
+    payload: { name: child, parent, task, ...(displayName ? { displayName } : {}) },
   }, sessionId)
 }
 
@@ -157,6 +160,8 @@ export interface SubagentState {
   watcher: import('fs').FSWatcher | null
   fileSize: number
   agentName: string
+  /** Friendly display label (e.g. "Explore · …"); agentName stays the identity. */
+  displayName?: string
   pendingToolCalls: Map<string, PendingToolCall>
   seenToolUseIds: Set<string>
   permissionTimer: NodeJS.Timeout | null
@@ -188,6 +193,9 @@ export interface WatchedSession {
   subagentsDir: string | null
   label: string
   labelSet: boolean
+  /** True once the label came from Claude's ai-title entry — a later first-user
+   *  message must not override it. */
+  labelFromAiTitle?: boolean
   model: string | null
   /** Maps agent names to their last emitted model ID — re-emits on model change */
   modelDetectedAgents: Map<string, string>
