@@ -7,30 +7,63 @@ import { useSelectionState } from "@/hooks/use-selection-state"
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts"
 import { useAgentColors, agentColorKey, AGENT_KEY_SEP } from "@/hooks/use-agent-colors"
 import { useAgentNames } from "@/hooks/use-agent-names"
+import { useSessionCallSigns } from "@/hooks/use-session-callsigns"
+import { resolveSessionName, type SessionName } from "@/lib/callsigns"
 import { AgentCanvas } from "./canvas"
 import { ControlBar } from "./control-bar"
 import { AgentDetailCard } from "./agent-detail-card"
+import { AgentHoverTooltip } from "./agent-hover-tooltip"
 import { GlassContextMenu } from "./glass-context-menu"
 import { AgentColorSwatches } from "./agent-color-swatches"
 // AgentChatPanel was merged into MessageFeedPanel (Global / Active sub-tabs).
 import { ToolDetailPopup } from "./tool-detail-popup"
 import { DiscoveryDetailPopup } from "./discovery-detail-popup"
 import { FileAttentionPanel } from "./file-attention-panel"
-import { TimelinePanel } from "./timeline-panel"
 import { OpenFileProvider } from "./tool-content-renderer"
 import { stopPropagationHandlers } from "./shared-ui"
-import { TimelineEvent, TIMING, Z } from "@/lib/agent-types"
+import { TimelineEvent, SimulationEvent, TIMING, Z } from "@/lib/agent-types"
 import { PARALLEL_VIEW_ID } from "@/lib/bridge-types"
 import { COLORS } from "@/lib/colors"
 
-import { MOCK_DURATION } from "@/lib/mock-scenario"
 import { MessageFeedPanel } from "./message-feed-panel"
 import { LegendPanel } from "./legend-panel"
 import { TopBar } from "./top-bar"
 import { PromptComposerPanel } from "./prompt-composer-panel"
+import { useStudySession } from "@/hooks/use-study-session"
+import { SessionTimerBar } from "./session-timer-bar"
+import { StudySessionArchive } from "./study-session-archive"
+import { ConfirmDialog, ProtocolPrompt } from "./study-session-dialogs"
+import type { RecordedSimEvent } from "@/lib/study-session-types"
+
+/** Stable empty event list so the simulation gets a constant identity while a
+ *  study-session replay is active (stops live events from being consumed). */
+const NO_EVENTS: SimulationEvent[] = []
+
+// Namespacing for study-session replay: prefix identity fields by their source
+// agent session so multiple tabs' agents render as distinct nodes (mirrors the
+// parallel view). Times are already on the shared study-session clock.
+const REPLAY_SEP = '␞'
+const REPLAY_IDENTITY = ['name', 'parent', 'agent', 'child'] as const
+function toSimReplayEvent(r: RecordedSimEvent): SimulationEvent {
+  const payload: Record<string, unknown> = { ...r.payload }
+  if (r.sessionId) {
+    if (r.type === 'agent_spawn' && typeof payload.name === 'string' && payload.displayName === undefined) {
+      payload.displayName = payload.name
+    }
+    const prefix = r.sessionId + REPLAY_SEP
+    for (const f of REPLAY_IDENTITY) {
+      if (typeof payload[f] === 'string') payload[f] = prefix + (payload[f] as string)
+    }
+  }
+  return { time: r.time, type: r.type as SimulationEvent['type'], payload, sessionId: r.sessionId }
+}
 
 export function AgentVisualizer() {
   const bridge = useVSCodeBridge()
+
+  // Study-session replay: when set, the simulation is showing a recorded past
+  // session (not live), so live events are withheld from it.
+  const [replaying, setReplaying] = useState<{ id: string; number: number } | null>(null)
 
   const {
     frameRef,
@@ -40,7 +73,6 @@ export function AgentVisualizer() {
     edges,
     discoveries,
     fileAttention,
-    timelineEntries,
     currentTime,
     isPlaying,
     speed,
@@ -54,9 +86,10 @@ export function AgentVisualizer() {
     updateAgentPosition,
     saveSnapshot,
     restoreSnapshot,
+    loadReplay,
   } = useAgentSimulation({
     useMockData: bridge.useMockData,
-    externalEvents: bridge.pendingEvents,
+    externalEvents: replaying ? NO_EVENTS : bridge.pendingEvents,
     onExternalEventsConsumed: bridge.consumeEvents,
     sessionFilter: bridge.selectedSessionId,
     // Pass the ref that's updated synchronously in session-started handler,
@@ -64,6 +97,13 @@ export function AgentVisualizer() {
     sessionFilterRef: bridge.selectedSessionIdRef,
     disable1MContext: bridge.disable1MContext,
   })
+
+  // ─── Study session (participant work-period clock + logging) ───────────────
+  const studyEnabled = !bridge.useMockData
+  const study = useStudySession({ enabled: studyEnabled, studyWebsiteUrl: bridge.studyWebsiteUrl })
+  const [showSessionArchive, setShowSessionArchive] = useState(false)
+  const [pauseConfirmOpen, setPauseConfirmOpen] = useState(false)
+  const [endConfirmOpen, setEndConfirmOpen] = useState(false)
 
   const selection = useSelectionState({ agents, toolCalls, discoveries })
 
@@ -98,14 +138,53 @@ export function AgentVisualizer() {
     return m
   }, [agents, agentColorStore, bridge.selectedSessionId])
 
-  // Effective display names: custom rename wins; else the main agent shows its
-  // session label (which the extension derives from ai-title / cleaned prompt);
-  // subagents fall through to the extension-provided name (Type · description).
+  // Per-session tab accent: ONLY the orchestrator's user-assigned identity color
+  // (so a colored tab ties to its nodes on canvas). Sessions the user hasn't
+  // colored are omitted — their tabs stay plain white with no accent.
+  const sessionAccentColors = useMemo(() => {
+    const sessionOf = (id: string) =>
+      id.includes(AGENT_KEY_SEP) ? id.split(AGENT_KEY_SEP)[0] : (bridge.selectedSessionId ?? '')
+    const m = new Map<string, string>()
+    for (const [id, agent] of agents) {
+      if (!agent.isMain) continue
+      const own = agentColorStore.get(agentColorKey(bridge.selectedSessionId, id))
+      if (own) m.set(sessionOf(id), own)
+    }
+    return m
+  }, [agents, agentColorStore, bridge.selectedSessionId])
+
+  // Effective display names: a per-agent (node) rename wins; else the main agent
+  // shows its session CALL-SIGN (or the tab rename); subagents fall through to
+  // the extension-provided name (Type · description).
   const { names: agentNameStore, setAgentName } = useAgentNames()
-  const sessionLabelById = useMemo(
-    () => new Map(bridge.sessions.map(s => [s.id, s.label] as const)),
-    [bridge.sessions],
-  )
+  // Neutral call-signs (Apple, Mango, …), auto-assigned + persisted per session.
+  const callSigns = useSessionCallSigns(bridge.sessions)
+  // Per-session display: call-sign as the NAME (tab + main node), goal summary as
+  // secondary context (node subtitle + tab tooltip). A tab rename overrides the
+  // call-sign — see resolveSessionName.
+  const sessionDisplay = useMemo(() => {
+    const m = new Map<string, SessionName>()
+    for (const s of bridge.sessions) {
+      const base = resolveSessionName(s.label, callSigns.get(s.id), bridge.sessionRenames.get(s.id))
+      // Prefer the fuller goal text from the host over the compact label-derived
+      // one, so the node subtitle + hover show more than the ~2-word summary.
+      const full = s.goal?.trim()
+      const goal = full && full !== base.name ? full : base.goal
+      m.set(s.id, { name: base.name, goal })
+    }
+    return m
+  }, [bridge.sessions, callSigns, bridge.sessionRenames])
+  // Same resolution for ARCHIVED (closed) sessions so the reopen menu shows the
+  // call-sign / rename, not the bare goal or "Session <id>" placeholder. Archived
+  // sessions have no live call-sign (pruned on close), so this yields the rename
+  // if any, else the goal label.
+  const archivedDisplay = useMemo(() => {
+    const m = new Map<string, SessionName>()
+    for (const s of bridge.archivedSessions) {
+      m.set(s.id, resolveSessionName(s.label, callSigns.get(s.id), bridge.sessionRenames.get(s.id)))
+    }
+    return m
+  }, [bridge.archivedSessions, callSigns, bridge.sessionRenames])
   const nameOverrides = useMemo(() => {
     const m = new Map<string, string>()
     for (const [id, agent] of agents) {
@@ -113,12 +192,36 @@ export function AgentVisualizer() {
       if (custom) { m.set(id, custom); continue }
       if (agent.isMain) {
         const sid = id.includes(AGENT_KEY_SEP) ? id.split(AGENT_KEY_SEP)[0] : bridge.selectedSessionId
-        const label = sid ? sessionLabelById.get(sid) : undefined
-        if (label) m.set(id, label)
+        const disp = sid ? sessionDisplay.get(sid) : undefined
+        if (disp) m.set(id, disp.name)
       }
     }
     return m
-  }, [agents, agentNameStore, bridge.selectedSessionId, sessionLabelById])
+  }, [agents, agentNameStore, bridge.selectedSessionId, sessionDisplay])
+
+  // Goal subtitles for the CANVAS only (main-agent nodes) — the dim second line
+  // under the call-sign. Panels don't use this (they show the name alone).
+  const agentSubtitles = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const [id, agent] of agents) {
+      if (!agent.isMain) continue
+      const sid = id.includes(AGENT_KEY_SEP) ? id.split(AGENT_KEY_SEP)[0] : bridge.selectedSessionId
+      const disp = sid ? sessionDisplay.get(sid) : undefined
+      if (disp?.goal) m.set(id, disp.goal)
+    }
+    return m
+  }, [agents, bridge.selectedSessionId, sessionDisplay])
+
+  // Full goal / task text shown in a cursor-following tooltip on hover — a
+  // "read it all" fallback since the node subtitle is only a 2-line preview.
+  // Main agents surface their session goal; subagents surface their full task.
+  const hoverText = useMemo(() => {
+    const id = selection.hoveredAgentId
+    if (!id) return null
+    const agent = agents.get(id)
+    if (!agent) return null
+    return (agent.isMain ? agentSubtitles.get(id) : agent.task) ?? null
+  }, [selection.hoveredAgentId, agents, agentSubtitles])
 
   // Agents with names overlaid — used by the React panels (canvas gets the map).
   const displayAgents = useMemo(() => {
@@ -141,10 +244,40 @@ export function AgentVisualizer() {
   }, [setAgentName, bridge.selectedSessionId])
 
   const [showStats, setShowStats] = useState(false)
+  // Token bar visibility — a user preference, persisted across reloads. Defaults
+  // on; loaded from localStorage after mount to avoid an SSR/hydration mismatch.
+  const [showTokens, setShowTokens] = useState(true)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const v = window.localStorage.getItem('agent-orgchart:show-tokens')
+    if (v != null) setShowTokens(v === '1')
+  }, [])
+  const toggleTokens = useCallback(() => {
+    setShowTokens(prev => {
+      const next = !prev
+      try { window.localStorage.setItem('agent-orgchart:show-tokens', next ? '1' : '0') } catch { /* ignore */ }
+      return next
+    })
+  }, [])
+  // Inline goal sublabel under nodes — OFF by default; the hover tooltip is the
+  // usual way to read a node's goal. Persisted across reloads (loaded post-mount
+  // to avoid an SSR/hydration mismatch).
+  const [showSubtitles, setShowSubtitles] = useState(false)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const v = window.localStorage.getItem('agent-orgchart:show-subtitles')
+    if (v != null) setShowSubtitles(v === '1')
+  }, [])
+  const toggleSubtitles = useCallback(() => {
+    setShowSubtitles(prev => {
+      const next = !prev
+      try { window.localStorage.setItem('agent-orgchart:show-subtitles', next ? '1' : '0') } catch { /* ignore */ }
+      return next
+    })
+  }, [])
   const [showHexGrid, setShowHexGrid] = useState(false)
-  const [showTimeline, setShowTimeline] = useState(false)
   const [showFileAttention, setShowFileAttention] = useState(false)
-  const [showLegend, setShowLegend] = useState(true)
+  const [showLegend, setShowLegend] = useState(false)
   const [showComposer, setShowComposer] = useState(false)
 
   // Unified conversation panel: Global (full session transcript) / Active thread.
@@ -213,6 +346,13 @@ export function AgentVisualizer() {
       // paused review scrubber while the new session is actually playing.
       setIsReviewing(false)
 
+      // Re-frame the incoming session. This resets the camera's
+      // userHasNavigated flag so continuous auto-fit re-engages and pulls the
+      // new nodes into view — otherwise, if the user had panned/zoomed the
+      // previous session, the incoming agents render off-screen and the tab
+      // looks empty until a manual zoom or a page reload.
+      setZoomToFitTrigger(n => n + 1)
+
       prevSelectedRef.current = bridge.selectedSessionId
     }
   }, [bridge.selectedSessionId, restart, bridge.flushSessionEvents, saveSnapshot, restoreSnapshot, bridge.getSessionEventCount])
@@ -259,32 +399,82 @@ export function AgentVisualizer() {
     }
   }, [isPlaying, play, pause])
 
-  const handleEnterReview = useCallback(() => {
-    pause()
-    setIsReviewing(true)
-  }, [pause])
-
+  // The replay scrubber's seek schedules a resume; keep the ref + its cleanup.
   const resumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const handleResumeLive = useCallback(() => {
-    setIsReviewing(false)
-    seekToTime(maxTimeReached)
-    setZoomToFitTrigger(n => n + 1)
-    if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current)
-    resumeTimerRef.current = setTimeout(() => { resumeTimerRef.current = null; play() }, TIMING.resumeLiveDelayMs)
-  }, [seekToTime, maxTimeReached, play])
   useEffect(() => () => { if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current) }, [])
 
-  const handleRestart = useCallback(() => {
+  // ─── Study-session controls ────────────────────────────────────────────────
+  const hasRunningAgents = useMemo(() => {
+    for (const a of agents.values()) {
+      if (a.state === 'thinking' || a.state === 'tool_calling' || a.state === 'waiting_permission') return true
+    }
+    return false
+  }, [agents])
+
+  // Pausing the clock is confirmed while agents are still working (the clock
+  // stops, but the agents keep running) — otherwise it pauses immediately.
+  const handleSessionPauseClick = useCallback(() => {
+    if (hasRunningAgents) setPauseConfirmOpen(true)
+    else study.pause()
+  }, [hasRunningAgents, study])
+
+  const confirmSessionPause = useCallback(() => {
+    setPauseConfirmOpen(false)
+    study.pause()
+  }, [study])
+
+  const confirmSessionEnd = useCallback(() => {
+    setEndConfirmOpen(false)
+    study.endSession()
+  }, [study])
+
+  const openEndConfirm = useCallback(() => setEndConfirmOpen(true), [])
+  const openSessionArchive = useCallback(() => setShowSessionArchive(true), [])
+
+  // Replay a recorded past session (parked at 0:00 — scrub/play via the Review
+  // control bar). Live events are withheld until replay is exited.
+  const handleReplaySession = useCallback((id: string) => {
+    const rec = study.getRecording(id)
+    if (!rec || rec.length === 0) return
+    const info = study.archive.find(a => a.id === id)
+    pause()
+    setReplaying({ id, number: info?.number ?? 0 })
+    setIsReviewing(true)
+    setShowSessionArchive(false)
+    selection.clearAllSelections()
+    loadReplay(rec.map(toSimReplayEvent))
+    setZoomToFitTrigger(n => n + 1)
+  }, [study, pause, loadReplay, selection])
+
+  // Leave replay and rebuild the live view of the selected session (mirrors a
+  // cold-start tab switch: restart, then flush that session's buffer).
+  const exitReplay = useCallback(() => {
+    if (!replaying) return
+    setReplaying(null)
     setIsReviewing(false)
-    restart(true)
-  }, [restart])
+    restart()
+    if (bridge.selectedSessionId) bridge.flushSessionEvents(bridge.selectedSessionId)
+    setZoomToFitTrigger(n => n + 1)
+  }, [replaying, restart, bridge])
+
+  // Tab actions must leave replay first, or the switched-in session would render
+  // empty (live events are withheld while replaying).
+  const handleSelectSession = useCallback((id: string) => {
+    if (replaying) exitReplay()
+    bridge.selectSession(id)
+  }, [replaying, exitReplay, bridge])
+  const handleReopenSession = useCallback((id: string) => {
+    if (replaying) exitReplay()
+    bridge.unarchiveSession(id)
+  }, [replaying, exitReplay, bridge])
 
   // Keyboard shortcuts
   const keyboardActions = useMemo(() => ({
-    togglePlayPause: handlePlayPause,
+    // Play/pause only applies to the replay scrubber now — live view has no
+    // transport, so space is a no-op there (avoids pausing with no way back).
+    togglePlayPause: () => { if (replaying) handlePlayPause() },
     toggleFilePanel: toggleFiles,
     toggleChat,
-    toggleTimeline: () => { setShowTimeline(prev => !prev) },
     toggleHexGrid: () => { setShowHexGrid(prev => !prev) },
     toggleStats: () => { setShowStats(prev => !prev) },
     zoomToFit: () => { setZoomToFitTrigger(n => n + 1) },
@@ -293,7 +483,7 @@ export function AgentVisualizer() {
     closeChat: () => { setChatOpen(false) },
     setSpeed,
     selectedAgentId: selection.selectedAgentId,
-  }), [handlePlayPause, selection.clearAllSelections, selection.clearAgent, selection.selectedAgentId, setSpeed, toggleFiles, toggleChat])
+  }), [replaying, handlePlayPause, selection.clearAllSelections, selection.clearAgent, selection.selectedAgentId, setSpeed, toggleFiles, toggleChat])
 
   useKeyboardShortcuts(keyboardActions)
 
@@ -331,9 +521,13 @@ export function AgentVisualizer() {
         },
       },
       { label: '📊  Toggle Stats', onClick: () => setShowStats(prev => !prev) },
+      { label: '🔢  Toggle token bar', onClick: toggleTokens },
+      { label: '📝  Toggle sublabels', onClick: toggleSubtitles },
     ] : [
       { label: '🔍  Zoom to Fit', onClick: () => setZoomToFitTrigger(n => n + 1) },
       { label: '📊  Toggle Stats', onClick: () => setShowStats(prev => !prev) },
+      { label: '🔢  Toggle token bar', onClick: toggleTokens },
+      { label: '📝  Toggle sublabels', onClick: toggleSubtitles },
       { label: '⬡  Toggle Grid', onClick: () => setShowHexGrid(prev => !prev) },
       { label: 'ⓘ  Toggle Legend', onClick: () => setShowLegend(prev => !prev) },
       { label: '', onClick: () => {}, separator: true },
@@ -362,6 +556,12 @@ export function AgentVisualizer() {
       if (remaining.length > 0) {
         bridge.selectSession(remaining[remaining.length - 1].id)
       } else {
+        // Last session closed: deselect FIRST (mirrors the parallel branch above).
+        // Without this, selectedSessionIdRef stays pinned to the just-closed id, so
+        // reopening it hits selectSession's same-id early-return and the canvas never
+        // cold-starts — a permanent blank, unrecoverable without a reload since the
+        // tab bar is hidden at ≤1 session.
+        bridge.selectSession(null)
         restart()
       }
     }
@@ -375,7 +575,7 @@ export function AgentVisualizer() {
   // session — not during the brief window after entering the parallel view / a
   // cold-start tab switch, where agents.size is momentarily 0 while flushed
   // events repopulate over the next animation frames.
-  const isEmpty = agents.size === 0 && !bridge.useMockData && bridge.sessions.length === 0
+  const isEmpty = agents.size === 0 && !bridge.useMockData && bridge.sessions.length === 0 && !replaying
 
   return (
     <OpenFileProvider value={bridge.isVSCode ? openFile : null}>
@@ -383,9 +583,18 @@ export function AgentVisualizer() {
       {/* Empty state when no demo and no live data */}
       {isEmpty && (
         <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
-          <div className="text-center">
-            <div className="text-base font-medium" style={{ color: COLORS.textDim, letterSpacing: '-0.01em' }}>Waiting for an agent session</div>
-            <div className="mt-1.5 text-sm" style={{ color: COLORS.textMuted }}>Start a Claude Code session to see activity</div>
+          <div
+            className="glass-card relative flex flex-col items-center text-center font-mono"
+            style={{ padding: '28px 40px', maxWidth: 340 }}
+          >
+            {/* Idle status dot — echoes the LIVE indicator's visual language */}
+            <span
+              className="w-2.5 h-2.5 rounded-full animate-pulse"
+              style={{ background: COLORS.idle, boxShadow: `0 0 8px ${COLORS.idle}` }}
+              aria-hidden="true"
+            />
+            <div className="mt-3.5 text-[14px] font-medium" style={{ color: COLORS.textDim }}>Waiting for an agent session</div>
+            <div className="mt-1.5 text-[12px]" style={{ color: COLORS.textMuted }}>Start a Claude Code session to see activity</div>
           </div>
         </div>
       )}
@@ -396,6 +605,8 @@ export function AgentVisualizer() {
         selectedAgentId={selection.selectedAgentId}
         hoveredAgentId={selection.hoveredAgentId}
         showStats={showStats}
+        showTokens={showTokens}
+        showSubtitles={showSubtitles}
         showHexGrid={showHexGrid}
         zoomToFitTrigger={zoomToFitTrigger}
         pauseAutoFit={selection.contextMenu !== null}
@@ -409,11 +620,16 @@ export function AgentVisualizer() {
         selectedDiscoveryId={selection.selectedDiscoveryId}
         agentColors={agentColors}
         agentNames={nameOverrides}
+        agentSubtitles={agentSubtitles}
         onAgentDoubleClick={(agentId, x, y) => setRenaming({ agentId, x, y })}
+        onAgentNameClick={(agentId, x, y) => setRenaming({ agentId, x, y })}
       />
 
       {/* Legend (bottom-left) — documents the visual language */}
       <LegendPanel visible={showLegend} onClose={() => setShowLegend(false)} onOpen={() => setShowLegend(true)} />
+
+      {/* Cursor-following full-goal / full-task tooltip on node hover. */}
+      <AgentHoverTooltip text={hoverText} />
 
       {/* Unified conversation panel (top-right): Global transcript / Active thread */}
       <MessageFeedPanel
@@ -432,7 +648,14 @@ export function AgentVisualizer() {
       {selectedAgent && selection.selectedAgentWorldPos && (
         <div {...stopPropagationHandlers}>
           <AgentDetailCard
-            agent={selectedAgent}
+            agent={{
+              ...selectedAgent,
+              // Show the full task; main agents fall back to the session goal.
+              task: selectedAgent.task ?? agentSubtitles.get(selectedAgent.id),
+            }}
+            onRename={(name) =>
+              setAgentName(agentColorKey(bridge.selectedSessionId, selectedAgent.id), name || null)
+            }
             onClose={selection.clearAgent}
           />
         </div>
@@ -497,30 +720,41 @@ export function AgentVisualizer() {
         </div>
       )}
 
-      {/* Floating control strip */}
-      <ControlBar
-        isPlaying={isPlaying}
-        speed={speed}
-        currentTime={currentTime}
-        totalDuration={bridge.useMockData
-          ? (isReviewing ? Math.max(maxTimeReached, currentTime) : MOCK_DURATION)
-          : Math.max(maxTimeReached, currentTime)
-        }
-        onPlayPause={handlePlayPause}
-        onRestart={handleRestart}
-        onSpeedChange={setSpeed}
-        onSeek={(time) => {
-          pause()
-          seekToTime(time)
-          setZoomToFitTrigger(n => n + 1)
-          if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current)
-        }}
-        timelineEvents={timelineEvents}
-        isReviewing={isReviewing}
-        eventCount={timelineEvents.length}
-        onEnterReview={handleEnterReview}
-        onResumeLive={handleResumeLive}
-      />
+      {/* Timeline scrubber — shown ONLY while replaying a recorded past session.
+          In live view the bottom holds the session timer pill instead (below). */}
+      {replaying && (
+        <ControlBar
+          isPlaying={isPlaying}
+          speed={speed}
+          currentTime={currentTime}
+          totalDuration={Math.max(maxTimeReached, currentTime)}
+          onPlayPause={handlePlayPause}
+          onRestart={() => { setIsReviewing(true); seekToTime(0) }}
+          onSpeedChange={setSpeed}
+          onSeek={(time) => {
+            pause()
+            seekToTime(time)
+            setZoomToFitTrigger(n => n + 1)
+            if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current)
+          }}
+          timelineEvents={timelineEvents}
+          isReviewing={isReviewing}
+          eventCount={timelineEvents.length}
+          onResumeLive={exitReplay}
+        />
+      )}
+
+      {/* Session timer — refined pill centered at the bottom (live view only) */}
+      {studyEnabled && study.current && !replaying && (
+        <SessionTimerBar
+          session={study.current}
+          onPause={handleSessionPauseClick}
+          onResume={study.resume}
+          onEnd={openEndConfirm}
+          onOpenArchive={openSessionArchive}
+          archiveCount={study.archive.length}
+        />
+      )}
 
       {/* File attention panel (slide-in from right) */}
       <FileAttentionPanel
@@ -530,34 +764,31 @@ export function AgentVisualizer() {
         onOpenFile={bridge.isVSCode ? openFile : undefined}
       />
 
-      {/* Timeline panel (slide-in from bottom) */}
-      <TimelinePanel
-        visible={showTimeline}
-        timelineEntries={timelineEntries}
-        currentTime={currentTime}
-        onClose={() => setShowTimeline(false)}
-      />
-
       {/* Top bar: session tabs + info/controls */}
       <TopBar
         sessions={bridge.sessions}
+        sessionDisplay={sessionDisplay}
         selectedSessionId={bridge.selectedSessionId}
         sessionsWithActivity={bridge.sessionsWithActivity}
-        onSelectSession={bridge.selectSession}
+        accentColors={sessionAccentColors}
+        onSelectSession={handleSelectSession}
         onCloseSession={handleCloseSession}
         onRenameSession={bridge.renameSession}
+        onReorderSession={bridge.reorderSessions}
         archivedSessions={bridge.archivedSessions}
-        onReopenSession={bridge.unarchiveSession}
+        archivedDisplay={archivedDisplay}
+        onReopenSession={handleReopenSession}
         isVSCode={bridge.isVSCode}
         connectionStatus={bridge.connectionStatus}
         agentCount={agents.size}
         showFileAttention={showFileAttention}
         showChat={chatOpen}
-        showTimeline={showTimeline}
+        showTokens={showTokens}
         onToggleFiles={toggleFiles}
         onToggleChat={toggleChat}
-        onToggleTimeline={() => setShowTimeline(prev => !prev)}
+        onToggleTokens={toggleTokens}
         onNewAgent={() => setShowComposer(true)}
+        onReturnToStudy={study.openStudyWebsite}
       />
 
       {/* Prompt composer: build a `claude` command to launch a new agent */}
@@ -565,6 +796,70 @@ export function AgentVisualizer() {
         visible={showComposer}
         onClose={() => setShowComposer(false)}
       />
+
+      {/* Replay banner (top-center) while reviewing a recorded past session */}
+      {replaying && (
+        <div
+          className="absolute top-4 left-1/2 -translate-x-1/2 font-mono text-[13px]"
+          style={{ zIndex: Z.info, pointerEvents: 'auto' }}
+        >
+          <div className="glass-card flex items-center gap-3 px-4 py-2">
+            <span style={{ color: COLORS.holoBright }}>▶ Replaying Session {replaying.number}</span>
+            <span style={{ color: COLORS.textMuted }}>recorded · read-only</span>
+            <button
+              onClick={exitReplay}
+              className="px-2.5 py-1 rounded transition-all hover:scale-[1.03]"
+              style={{ background: COLORS.liveResumeBg, border: `1px solid ${COLORS.liveResumeBorder}`, color: COLORS.liveText }}
+            >
+              Exit replay
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Study session archive — past sessions, replay to retrace steps */}
+      <StudySessionArchive
+        open={showSessionArchive}
+        onClose={() => setShowSessionArchive(false)}
+        archive={study.archive}
+        onReplay={handleReplaySession}
+        onDelete={study.deleteArchived}
+      />
+
+      {/* 15-minute protocol popup (dismissable — keeps the session going) */}
+      {study.protocolPromptOpen && (
+        <ProtocolPrompt
+          onOpenWebsite={study.openStudyWebsite}
+          onDismiss={study.dismissProtocolPrompt}
+        />
+      )}
+
+      {/* Pause confirmation — agents still running */}
+      {pauseConfirmOpen && (
+        <ConfirmDialog
+          title="Agents are still running"
+          body="Pausing stops your session clock, but any running agents keep working. Pause anyway?"
+          confirmLabel="Pause anyway"
+          cancelLabel="Keep going"
+          onConfirm={confirmSessionPause}
+          onCancel={() => setPauseConfirmOpen(false)}
+        />
+      )}
+
+      {/* End-session confirmation */}
+      {endConfirmOpen && (
+        <ConfirmDialog
+          title="End this session?"
+          body={hasRunningAgents
+            ? 'This finalizes the current session in the logs and starts a new one at 0:00. Agents that are still running will keep working.'
+            : 'This finalizes the current session in the logs and starts a new one at 0:00.'}
+          confirmLabel="End session"
+          cancelLabel="Cancel"
+          tone="danger"
+          onConfirm={confirmSessionEnd}
+          onCancel={() => setEndConfirmOpen(false)}
+        />
+      )}
     </div>
     </OpenFileProvider>
   )

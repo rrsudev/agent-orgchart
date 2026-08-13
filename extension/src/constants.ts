@@ -55,7 +55,10 @@ export const DEV_WEB_ORIGIN_PATTERN = /^http:\/\/(?:localhost|127\.0\.0\.1)(?::\
 export const HOOK_SERVER_NOT_STARTED = -1
 
 /** Maximum HTTP request body size for hook server (bytes) */
-export const HOOK_MAX_BODY_SIZE = 1024 * 1024 // 1 MB
+// 32 MB. Large tool_response payloads (big file Reads, Bash stdout, MCP results)
+// routinely exceed 1 MB; at the old 1 MB cap they were dropped whole — vanishing
+// from BOTH the live UI and the study capture. Kept as a sanity ceiling only.
+export const HOOK_MAX_BODY_SIZE = 32 * 1024 * 1024
 
 /** Hook timeout value written to settings.json (seconds) */
 export const HOOK_TIMEOUT_S = 2

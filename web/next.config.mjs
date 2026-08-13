@@ -3,11 +3,9 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
-  // Move the Next.js dev-mode indicator (the "N" logo) out of the bottom-left,
-  // where it overlapped the legend panel/button, into the bottom-right corner.
-  devIndicators: {
-    position: 'bottom-right',
-  },
+  // Hide the Next.js dev-mode indicator entirely (the "N" dev-tools button that
+  // expands to show Route, Bundler, etc.).
+  devIndicators: false,
 }
 
 export default nextConfig

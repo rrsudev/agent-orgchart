@@ -4,7 +4,6 @@ export function useKeyboardShortcuts(actions: {
   togglePlayPause: () => void
   toggleFilePanel: () => void
   toggleChat: () => void
-  toggleTimeline: () => void
   toggleHexGrid: () => void
   toggleStats: () => void
   zoomToFit: () => void
@@ -32,10 +31,6 @@ export function useKeyboardShortcuts(actions: {
           break
         case 'F':
           a.zoomToFit()
-          break
-        case 't':
-        case 'T':
-          a.toggleTimeline()
           break
         case 'Delete':
         case 'Backspace':

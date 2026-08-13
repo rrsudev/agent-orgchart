@@ -9,12 +9,27 @@ import { SimulationEvent } from '@/lib/agent-types'
 const IDENTITY_FIELDS = ['name', 'parent', 'agent', 'child'] as const
 const SESSION_SEP = '␞' // record-separator glyph — never appears in real names
 
+/** Hard cap on per-session buffered events (a replay backstop). A study session
+ *  virtually never reaches this; it bounds heap for a pathological multi-hour
+ *  runaway so the tab can't OOM. On overflow we trim the OLDEST events (a later
+ *  cold-start replay then begins mid-session) and remember how many were dropped
+ *  so save/restore indices stay absolute. */
+const MAX_SESSION_BUFFER = 50_000
+
 /** Golden angle — spreads N points evenly with no two sharing a direction. */
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5))
-/** Radial spacing between session orchestrators in the parallel view. Sized so
- *  each session's cluster (root + children ~1 AGENT_SPAWN_DISTANCE out) clears
- *  its neighbours. */
-const ORCH_RING_STEP = 560
+/** Radial seed spacing between session orchestrators in the parallel view.
+ *  Placement is a Vogel/phyllotaxis spiral (radius = STEP·√index) purely for the
+ *  INITIAL seed — orchestrators start in a tight cluster NEAR THE ORIGIN and the
+ *  force sim (inward gravity + collide) spreads them into a compact, centered
+ *  constellation. A small step is deliberate: it keeps every session seeding near
+ *  the center instead of ever-farther out on the periphery (radius grew with √N),
+ *  which used to make auto-fit zoom way out to frame near-empty space before
+ *  gravity pulled everything back in. The golden angle only gives each seed a
+ *  distinct direction so charge has a well-defined way to separate coincident
+ *  starts; final spacing is owned by forceCollide (nodes) + findToolSlot
+ *  (tool cards), so a small seed can't cause real overlap. */
+const ORCH_RING_STEP = 70
 
 /** Per-session context used to place + badge orchestrators in the parallel view. */
 interface ParallelMeta { index: number; label: string }
@@ -32,8 +47,9 @@ function shortSessionTag(label: string): string {
  * original name is preserved as `displayName` so node labels stay clean.
  *
  * When `meta` is supplied, the session's orchestrator (a parentless root spawn)
- * is also given a distinct spawn position (so orchestrators don't pile at the
- * origin) and a session tag on its label (so they're distinguishable).
+ * is also given a near-origin seed position with a distinct direction (so the
+ * force sim can separate them into a compact, centered constellation) and a
+ * session tag on its label (so they're distinguishable).
  */
 function namespaceEvent(evt: SimulationEvent, meta?: ParallelMeta): SimulationEvent {
   if (!evt.sessionId) return evt
@@ -43,7 +59,8 @@ function namespaceEvent(evt: SimulationEvent, meta?: ParallelMeta): SimulationEv
     // Preserve the original name for clean node labels before namespacing.
     if (payload.displayName === undefined) payload.displayName = payload.name
     // A parentless root spawn is the session's orchestrator: badge it with a
-    // session tag and give it a distinct spawn position in the parallel view.
+    // session tag and seed it near the origin (distinct direction per session)
+    // so the force sim spreads them into a compact, centered constellation.
     if (meta && typeof payload.parent !== 'string') {
       payload.displayName = `${payload.displayName} · ${shortSessionTag(meta.label)}`
       const radius = ORCH_RING_STEP * Math.sqrt(meta.index)
@@ -68,6 +85,8 @@ interface BridgeHookResult {
   useMockData: boolean
   /** Whether CLAUDE_CODE_DISABLE_1M_CONTEXT=1 is set — caps context window to 200k */
   disable1MContext: boolean
+  /** Study-website URL (host setting) for the 15-min protocol popup; undefined = use app default. */
+  studyWebsiteUrl?: string
   /** Open a file in the VS Code editor */
   bridgeOpenFile: (filePath: string, line?: number) => void
   /** Known sessions from the extension */
@@ -86,8 +105,12 @@ interface BridgeHookResult {
   sessionsWithActivity: Set<string>
   /** Remove (archive) a session from the list */
   removeSession: (sessionId: string) => void
-  /** Rename a session tab (persists locally; blank name reverts to bridge label) */
+  /** Reorder open tabs by moving `fromId` to `toId`'s slot (drag-to-reorder). Persisted. */
+  reorderSessions: (fromId: string, toId: string) => void
+  /** Rename a session tab (persists locally; blank name reverts to call-sign) */
   renameSession: (sessionId: string, label: string) => void
+  /** User tab renames (id → custom name) — an overlay applied over the call-sign. */
+  sessionRenames: Map<string, string>
   /** Archived (closed) sessions, oldest→newest, for the reopen/undo UI */
   archivedSessions: SessionInfo[]
   /** Reopen a previously archived session (undo a close) */
@@ -109,6 +132,8 @@ export function useVSCodeBridge(): BridgeHookResult {
     process.env.NEXT_PUBLIC_DEMO !== '0'
   )
   const [disable1MContext, setDisable1MContext] = useState(false)
+  /** Study-website URL for the 15-min protocol popup, from the host setting. */
+  const [studyWebsiteUrl, setStudyWebsiteUrl] = useState<string | undefined>(undefined)
   const pendingEventsRef = useRef<SimulationEvent[]>([])
   const [, setEventVersion] = useState(0) // trigger re-render on new events
 
@@ -117,6 +142,10 @@ export function useVSCodeBridge(): BridgeHookResult {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
   const selectedSessionIdRef = useRef<string | null>(null)
   const sessionEventsRef = useRef<Map<string, SimulationEvent[]>>(new Map())
+  // Per-session count of events trimmed off the FRONT of the buffer (see
+  // MAX_SESSION_BUFFER). Keeps getSessionEventCount an absolute, monotonic count
+  // so a saved fromIndex still resolves correctly after a trim.
+  const sessionDroppedRef = useRef<Map<string, number>>(new Map())
   // Mirror of `sessions` for synchronous label lookups from event transforms.
   const sessionsRef = useRef<SessionInfo[]>([])
   sessionsRef.current = sessions
@@ -155,6 +184,13 @@ export function useVSCodeBridge(): BridgeHookResult {
       } catch { /* ignore malformed storage */ }
     }
   }
+  // State mirror of the renames (the ref is for synchronous reads; state drives
+  // the tab/node display via resolveSessionName). Populated post-mount to match
+  // the archived-sessions pattern and avoid an SSR/hydration mismatch.
+  const [sessionRenames, setSessionRenames] = useState<Map<string, string>>(new Map())
+  useEffect(() => {
+    if (customLabelsRef.current.size > 0) setSessionRenames(new Map(customLabelsRef.current))
+  }, [])
 
   // Archived (closed) sessions, keyed by id in archive order (insertion order of
   // a Map is preserved). Persisted so a closed tab stays closed across reloads,
@@ -190,11 +226,48 @@ export function useVSCodeBridge(): BridgeHookResult {
     setArchivedSessions([...archivedRef.current.values()])
   }, [])
 
-  /** Overlay any user rename onto a session's bridge-provided label. */
-  const withCustomLabel = useCallback((s: SessionInfo): SessionInfo => {
-    const custom = customLabelsRef.current.get(s.id)
-    return custom ? { ...s, label: custom } : s
+  // Persisted OPEN-tab order (array of session ids, left→right). Together with
+  // the archived map this is the two-bucket persistence model: on reload a
+  // session is restored as an open tab or hidden purely by whether it sits in
+  // the archive, and open tabs come back in the exact order the user left them
+  // (including any drag-reordering) rather than in the bridge's list order.
+  const TAB_ORDER_KEY = 'agent-orgchart:tab-order'
+  const tabOrderRef = useRef<string[]>([])
+  const tabOrderLoadedRef = useRef(false)
+  if (!tabOrderLoadedRef.current) {
+    tabOrderLoadedRef.current = true
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = window.localStorage.getItem(TAB_ORDER_KEY)
+        if (raw) tabOrderRef.current = JSON.parse(raw) as string[]
+      } catch { /* ignore malformed storage */ }
+    }
+  }
+  const persistTabOrder = useCallback((ids: string[]) => {
+    tabOrderRef.current = ids
+    if (typeof window !== 'undefined') {
+      try { window.localStorage.setItem(TAB_ORDER_KEY, JSON.stringify(ids)) } catch { /* ignore */ }
+    }
   }, [])
+  /** Sort a session list by the persisted open-tab order (known ids first, in
+   *  saved order; never-seen sessions keep their incoming order, appended), then
+   *  persist the resolved order so it round-trips on the next reload. */
+  const applyTabOrder = useCallback((list: SessionInfo[]): SessionInfo[] => {
+    const rank = new Map(tabOrderRef.current.map((id, i) => [id, i]))
+    const ordered = [...list].sort((a, b) => {
+      const ra = rank.get(a.id) ?? Number.MAX_SAFE_INTEGER
+      const rb = rank.get(b.id) ?? Number.MAX_SAFE_INTEGER
+      return ra - rb // Array.sort is stable → unknowns keep incoming order
+    })
+    persistTabOrder(ordered.map(s => s.id))
+    return ordered
+  }, [persistTabOrder])
+
+  // A tab rename no longer rewrites `label` — it's an OVERLAY (sessionRenames)
+  // applied at display time (resolveSessionName). This keeps `label` == the
+  // extension's goal summary, so the goal stays available as subtitle/tooltip
+  // context even after a rename, and clearing a rename cleanly reveals the goal
+  // again (no "lost original label" problem).
 
   // Connect to standalone dev relay server via SSE when not in VS Code
   useEffect(() => {
@@ -257,6 +330,15 @@ export function useVSCodeBridge(): BridgeHookResult {
       if (event.sessionId) {
         const buf = sessionEventsRef.current.get(event.sessionId) || []
         buf.push(simEvent)
+        // Backstop against unbounded growth over a multi-hour session: trim the
+        // oldest events and remember how many, so absolute indices still line up.
+        if (buf.length > MAX_SESSION_BUFFER) {
+          const drop = buf.length - MAX_SESSION_BUFFER
+          buf.splice(0, drop)
+          const prev = sessionDroppedRef.current.get(event.sessionId) ?? 0
+          if (prev === 0) console.warn(`[bridge] session ${event.sessionId} exceeded ${MAX_SESSION_BUFFER} buffered events — trimming oldest (cold-start replay will begin mid-session)`)
+          sessionDroppedRef.current.set(event.sessionId, prev + drop)
+        }
         sessionEventsRef.current.set(event.sessionId, buf)
       }
 
@@ -295,7 +377,9 @@ export function useVSCodeBridge(): BridgeHookResult {
         if (saved) {
           setSessions(prev => {
             if (prev.find(s => s.id === saved.id)) return prev
-            return [...prev, { ...saved, status: 'active' as const, lastActivityTime: Date.now() }]
+            const next = [...prev, { ...saved, status: 'active' as const, lastActivityTime: Date.now() }]
+            persistTabOrder(next.map(s => s.id))
+            return next
           })
         }
       }
@@ -308,6 +392,7 @@ export function useVSCodeBridge(): BridgeHookResult {
     const unsubConfig = bridge.onConfig((config) => {
       if (config.showMockData !== undefined) { setUseMockData(config.showMockData) }
       if (config.disable1MContext !== undefined) { setDisable1MContext(config.disable1MContext) }
+      if (config.studyWebsiteUrl !== undefined) { setStudyWebsiteUrl(config.studyWebsiteUrl) }
     })
 
     // Session lifecycle tracking
@@ -322,6 +407,7 @@ export function useVSCodeBridge(): BridgeHookResult {
         selectedSessionIdRef.current = null
         pendingEventsRef.current.length = 0
         sessionEventsRef.current.clear()
+        sessionDroppedRef.current.clear()
         sessionOrderRef.current.clear()
         sessionOrderNextRef.current = 0
         setSessionsWithActivity(new Set())
@@ -330,10 +416,12 @@ export function useVSCodeBridge(): BridgeHookResult {
         return
       }
       if (type === 'list') {
-        // Drop archived (closed) sessions so they don't reappear on reload.
-        const sessionList = (data as SessionInfo[])
-          .filter(s => !archivedRef.current.has(s.id))
-          .map(withCustomLabel)
+        // Drop archived (closed) sessions so they don't reappear on reload, then
+        // restore the user's saved left→right tab order (new sessions appended).
+        const sessionList = applyTabOrder(
+          (data as SessionInfo[])
+            .filter(s => !archivedRef.current.has(s.id))
+        )
         setSessions(sessionList)
         // Auto-select: prefer active sessions, then most recently active.
         // Only set selection — useLayoutEffect handles flushing events.
@@ -351,7 +439,7 @@ export function useVSCodeBridge(): BridgeHookResult {
           setSelectedSessionId(autoId)
         }
       } else if (type === 'started') {
-        const session = withCustomLabel(data as SessionInfo)
+        const session = data as SessionInfo
         // A user archived (closed) this session — keep it hidden even if it
         // starts/resumes again.
         if (archivedRef.current.has(session.id)) return
@@ -363,7 +451,9 @@ export function useVSCodeBridge(): BridgeHookResult {
               ? { ...s, status: 'active' as const, lastActivityTime: Date.now() }
               : s)
           }
-          return [...prev, session]
+          const next = [...prev, session]
+          persistTabOrder(next.map(s => s.id))
+          return next
         })
         // Don't switch when there's nothing to switch to:
         //  - Parallel view: the new/resumed session's events already flow into
@@ -384,11 +474,11 @@ export function useVSCodeBridge(): BridgeHookResult {
         selectedSessionIdRef.current = session.id
         setSelectedSessionId(session.id)
       } else if (type === 'updated') {
-        const { sessionId, label } = data as { sessionId: string; label: string }
-        // A user rename takes precedence over the bridge-provided label.
-        const effectiveLabel = customLabelsRef.current.get(sessionId) ?? label
+        const { sessionId, label, goal } = data as { sessionId: string; label: string; goal?: string }
+        // `label`/`goal` are the extension's summaries; a user rename is a
+        // separate overlay (sessionRenames), so it is not merged in here.
         setSessions(prev => prev.map(s =>
-          s.id === sessionId ? { ...s, label: effectiveLabel } : s
+          s.id === sessionId ? { ...s, label, goal: goal ?? s.goal } : s
         ))
       } else if (type === 'ended') {
         const sessionId = data as string
@@ -416,6 +506,14 @@ export function useVSCodeBridge(): BridgeHookResult {
   /** Switch session selection. Does NOT flush events — call flushSessionEvents
    *  from useLayoutEffect after the simulation state has been saved/swapped. */
   const selectSession = useCallback((sessionId: string | null) => {
+    // Re-selecting the session that's already showing is a no-op. Falling
+    // through would set sessionSwitchPendingRef=true, but the identical
+    // setSelectedSessionId value bails out of React's update, so the
+    // index.tsx useLayoutEffect (which clears the flag via flushSessionEvents)
+    // never runs — stranding live delivery off until a reload. This is exactly
+    // what happens when the user clicks the active tab or the "All agents"
+    // segment while already in the parallel view.
+    if (sessionId === selectedSessionIdRef.current) return
     // Block event delivery to pending until the simulation state is swapped
     sessionSwitchPendingRef.current = true
     pendingEventsRef.current.length = 0
@@ -468,18 +566,33 @@ export function useVSCodeBridge(): BridgeHookResult {
     const buffered = sessionId === PARALLEL_VIEW_ID
       ? mergedAllEvents()
       : (sessionEventsRef.current.get(sessionId) || [])
+    // fromIndex is an ABSOLUTE processed-count; subtract events already trimmed
+    // off the front (buffer cap) so we resume at the right place, not too late.
+    let dropped = 0
+    if (sessionId === PARALLEL_VIEW_ID) {
+      for (const [sid, d] of sessionDroppedRef.current) {
+        if (!archivedRef.current.has(sid)) dropped += d
+      }
+    } else {
+      dropped = sessionDroppedRef.current.get(sessionId) ?? 0
+    }
     pendingEventsRef.current.length = 0
-    pendingEventsRef.current.push(...buffered.slice(fromIndex))
+    pendingEventsRef.current.push(...buffered.slice(Math.max(0, fromIndex - dropped)))
     setEventVersion(v => v + 1)
   }, [mergedAllEvents])
 
   const getSessionEventCount = useCallback((sessionId: string): number => {
+    // ABSOLUTE count (includes events already trimmed off the front) so it stays
+    // monotonic across a buffer cap — flushSessionEvents subtracts the drop.
     if (sessionId === PARALLEL_VIEW_ID) {
       let total = 0
-      for (const buf of sessionEventsRef.current.values()) total += buf.length
+      for (const [sid, buf] of sessionEventsRef.current) {
+        total += buf.length + (sessionDroppedRef.current.get(sid) ?? 0)
+      }
       return total
     }
-    return sessionEventsRef.current.get(sessionId)?.length ?? 0
+    return (sessionEventsRef.current.get(sessionId)?.length ?? 0)
+      + (sessionDroppedRef.current.get(sessionId) ?? 0)
   }, [])
 
   const dismissedSessionsRef = useRef<Map<string, SessionInfo>>(new Map())
@@ -496,7 +609,9 @@ export function useVSCodeBridge(): BridgeHookResult {
         archivedRef.current.set(sessionId, session)
         syncArchived()
       }
-      return prev.filter(s => s.id !== sessionId)
+      const next = prev.filter(s => s.id !== sessionId)
+      persistTabOrder(next.map(s => s.id))
+      return next
     })
     setSessionsWithActivity(prev => {
       if (!prev.has(sessionId)) return prev
@@ -504,38 +619,55 @@ export function useVSCodeBridge(): BridgeHookResult {
       next.delete(sessionId)
       return next
     })
-  }, [syncArchived])
+  }, [syncArchived, persistTabOrder])
+
+  /** Reorder open tabs: move `fromId` into `toId`'s slot. Persisted so the new
+   *  left→right order survives reload (drag-to-reorder in the tab bar). */
+  const reorderSessions = useCallback((fromId: string, toId: string) => {
+    setSessions(prev => {
+      const from = prev.findIndex(s => s.id === fromId)
+      const to = prev.findIndex(s => s.id === toId)
+      if (from === -1 || to === -1 || from === to) return prev
+      const next = [...prev]
+      const [moved] = next.splice(from, 1)
+      next.splice(to, 0, moved)
+      persistTabOrder(next.map(s => s.id))
+      return next
+    })
+  }, [persistTabOrder])
 
   /** Reopen a previously archived (closed) session. Un-archives it, restores its
-   *  tab, and selects it — its kept buffer cold-starts to restore full state. */
+   *  tab, and selects it — its kept buffer cold-starts to restore full state.
+   *  Any archived session can be reopened directly (no LIFO undo). */
   const unarchiveSession = useCallback((sessionId: string) => {
     const info = archivedRef.current.get(sessionId)
     if (!info) return
     archivedRef.current.delete(sessionId)
     syncArchived()
-    setSessions(prev => prev.some(s => s.id === sessionId) ? prev : [...prev, withCustomLabel(info)])
+    setSessions(prev => {
+      if (prev.some(s => s.id === sessionId)) return prev
+      const next = [...prev, info]
+      persistTabOrder(next.map(s => s.id))
+      return next
+    })
     selectSession(sessionId)
-  }, [syncArchived, withCustomLabel, selectSession])
+  }, [syncArchived, selectSession, persistTabOrder])
 
-  /** Rename a session tab. Persists locally and overrides the bridge label.
-   *  An empty/blank name clears the override (reverts to the bridge label). */
+  /** Rename a session tab. The rename is an OVERLAY (persisted) applied over the
+   *  call-sign at display time — it does NOT rewrite the session's goal `label`.
+   *  An empty/blank name clears the override, reverting to the call-sign. */
   const renameSession = useCallback((sessionId: string, label: string) => {
     const trimmed = label.trim()
-    if (trimmed) customLabelsRef.current.set(sessionId, trimmed)
-    else customLabelsRef.current.delete(sessionId)
+    const next = new Map(customLabelsRef.current)
+    if (trimmed) next.set(sessionId, trimmed)
+    else next.delete(sessionId)
+    customLabelsRef.current = next
     if (typeof window !== 'undefined') {
       try {
-        window.localStorage.setItem(
-          CUSTOM_LABELS_KEY,
-          JSON.stringify(Object.fromEntries(customLabelsRef.current)),
-        )
+        window.localStorage.setItem(CUSTOM_LABELS_KEY, JSON.stringify(Object.fromEntries(next)))
       } catch { /* ignore quota/availability errors */ }
     }
-    // Reflect immediately in the UI. When cleared, we can't recover the original
-    // bridge label locally, so keep the current text until the next bridge update.
-    if (trimmed) {
-      setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, label: trimmed } : s))
-    }
+    setSessionRenames(next) // reflect immediately in tabs + nodes
   }, [])
 
   const bridgeOpenFile = useCallback((filePath: string, line?: number) => {
@@ -549,6 +681,7 @@ export function useVSCodeBridge(): BridgeHookResult {
     consumeEvents,
     useMockData,
     disable1MContext,
+    studyWebsiteUrl,
     bridgeOpenFile,
     sessions,
     selectedSessionId,
@@ -558,7 +691,9 @@ export function useVSCodeBridge(): BridgeHookResult {
     getSessionEventCount,
     sessionsWithActivity,
     removeSession,
+    reorderSessions,
     renameSession,
+    sessionRenames,
     archivedSessions,
     unarchiveSession,
   }

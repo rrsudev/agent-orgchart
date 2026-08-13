@@ -1,10 +1,9 @@
 'use client'
 
-import { useState, useRef, useMemo, useCallback } from 'react'
+import { useState, useRef, useMemo } from 'react'
 import { Agent, Z } from '@/lib/agent-types'
 import { COLORS, ROLE_COLORS } from '@/lib/colors'
 import type { ConversationMessage } from '@/hooks/simulation/types'
-import { useClickOutside } from '@/hooks/use-click-outside'
 import { useVirtualList } from '@/hooks/use-virtual-list'
 import { useAutoScroll } from '@/hooks/use-auto-scroll'
 import { TranscriptMessage } from './transcript-message'
@@ -102,19 +101,22 @@ export function MessageFeedPanel({
   const { visibleItems, totalHeight, offsetTop, handleScroll, measureRef } =
     useVirtualList(sessionMessages, logRef, { gap: GAP, autoScroll: true })
 
-  // ── Active: selected agent's own thread ──
-  const selectedAgent = selectedAgentId ? agents.get(selectedAgentId) : null
+  // ── Tab: the current tab's thread — the selected agent, or (when nothing is
+  // selected) the session's main agent, so it's never empty. ──
+  const mainAgentId = useMemo(() => {
+    for (const [id, a] of agents) if (a.isMain) return id
+    return null
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agentKey])
+  const threadAgentId = selectedAgentId ?? mainAgentId
+  const threadAgent = threadAgentId ? agents.get(threadAgentId) : null
   const activeConversation = useMemo(
-    () => (mode === 'active' && selectedAgentId ? conversations.get(selectedAgentId) ?? [] : []),
-    [mode, selectedAgentId, conversations],
+    () => (mode === 'active' && threadAgentId ? conversations.get(threadAgentId) ?? [] : []),
+    [mode, threadAgentId, conversations],
   )
   const { ref: activeLogRef } = useAutoScroll(activeConversation.length, open && mode === 'active')
 
-  const panelRef = useRef<HTMLDivElement>(null)
-  const collapse = useCallback(() => onOpenChange(false), [onOpenChange])
-  useClickOutside(panelRef, collapse)
-
-  const labelFor = (a?: Agent) => ((a?.runtime ?? runtime) === 'codex' ? 'CODEX' : 'CLAUDE')
+  const labelFor = (a?: Agent | null) => ((a?.runtime ?? runtime) === 'codex' ? 'CODEX' : 'CLAUDE')
 
   if (!latestMessage && agents.size === 0) return null
 
@@ -146,10 +148,9 @@ export function MessageFeedPanel({
     )
   }
 
-  // ── Expanded: Global (transcript) / Active (thread) ──
+  // ── Expanded: Global (transcript) / Tab (current tab's thread) ──
   return (
     <div
-      ref={panelRef}
       className="absolute"
       style={{ top: 66, right: 12, zIndex: Z.info, pointerEvents: 'auto' }}
       onClick={(e) => e.stopPropagation()}
@@ -160,10 +161,10 @@ export function MessageFeedPanel({
           <div className="flex gap-0.5 min-w-0">
             <SubTab label="Global" active={mode === 'global'} onClick={() => onModeChange('global')} />
             <SubTab
-              label={selectedAgent ? `Active · ${selectedAgent.name}` : 'Active'}
+              label="Tab"
               active={mode === 'active'}
-              disabled={!selectedAgentId}
-              onClick={() => selectedAgentId && onModeChange('active')}
+              disabled={!threadAgentId}
+              onClick={() => threadAgentId && onModeChange('active')}
             />
           </div>
           <div className="flex items-center gap-1 shrink-0">
@@ -236,13 +237,13 @@ export function MessageFeedPanel({
             className="flex-1 overflow-y-auto space-y-1.5 px-2 py-2"
             style={{ maxHeight: 380, scrollbarWidth: 'thin', scrollbarColor: `${COLORS.scrollbarThumb} transparent` }}
           >
-            {!selectedAgent ? (
-              <EmptyHint text="Select an agent to view its thread" />
+            {!threadAgent ? (
+              <EmptyHint text="No messages yet" />
             ) : activeConversation.length === 0 ? (
               <EmptyHint text="No messages yet" />
             ) : (
               activeConversation.map((msg) => (
-                <TranscriptMessage key={msg.id} message={msg} assistantLabel={labelFor(selectedAgent)} />
+                <TranscriptMessage key={msg.id} message={msg} assistantLabel={labelFor(threadAgent)} />
               ))
             )}
           </div>

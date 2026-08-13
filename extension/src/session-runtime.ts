@@ -21,6 +21,8 @@ export interface SessionLifecycleEvent {
   type: 'started' | 'ended' | 'updated'
   sessionId: string
   label: string
+  /** Fuller goal text (untruncated summary) — surfaced as node subtitle + hover. */
+  goal?: string
 }
 
 /** Interface every runtime's watcher implements. Uses portable typed-event
@@ -100,13 +102,14 @@ export function wireWatcherToPanel(
         session: {
           id: lifecycle.sessionId,
           label: lifecycle.label,
+          goal: lifecycle.goal,
           status: 'active',
           startTime: Date.now(),
           lastActivityTime: Date.now(),
         },
       })
     } else if (lifecycle.type === 'updated') {
-      panel.postMessage({ type: 'session-updated', sessionId: lifecycle.sessionId, label: lifecycle.label })
+      panel.postMessage({ type: 'session-updated', sessionId: lifecycle.sessionId, label: lifecycle.label, goal: lifecycle.goal })
     } else {
       panel.postMessage({ type: 'session-ended', sessionId: lifecycle.sessionId })
     }

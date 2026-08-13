@@ -177,11 +177,26 @@ export const CAMERA = {
 // ─── Force simulation config ────────────────────────────────────────────────
 
 export const FORCE = {
-  chargeStrength: -1200,
-  centerStrength: 0.03,
-  collideRadius: 140,
-  linkDistance: 350,
-  linkStrength: 0.4,
+  // Repulsion between nodes. Softened from -1200 so agents no longer blow apart;
+  // collide (below) is what actually guarantees they never overlap.
+  chargeStrength: -700,
+  // Legacy centroid re-centering (translation only — does NOT compress the
+  // layout). Real inward pull comes from gravityStrength.
+  centerStrength: 0.02,
+  // Per-node collision radius → min center-to-center spacing is 2× this (200px).
+  // This is the hard no-overlap floor; nodes (r≤28) plus a little tool-card
+  // breathing room fit comfortably inside it. Was 140 (=280px), the dominant
+  // cause of the over-spread look.
+  collideRadius: 100,
+  // Parent→child rest length. Pinned to the spawn distance (250) so links no
+  // longer stretch trees outward after spawn (was 350).
+  linkDistance: 250,
+  linkStrength: 0.5,
+  // Per-node gravity toward the origin (forceX/forceY). This is what pulls
+  // disconnected session clusters in the parallel view together into a compact
+  // constellation — forceCenter alone can't, since it only translates. Kept mild
+  // so collide/charge still win locally and nothing is crushed past the floor.
+  gravityStrength: 0.055,
   alphaDecay: 0.02,
   velocityDecay: 0.4,
 } as const
@@ -240,6 +255,11 @@ export const AGENT_DRAW = {
   shadowOffsetY: 2,
   /** Agent name label Y offset from agent radius */
   labelYOffset: 8,
+  /** Vertical gap between the (wrapped) name block and the goal subtitle. */
+  subtitleGap: 2,
+  /** Gap between the bottom of the wrapped label block and the token/context bar,
+   *  so the bar always clears multi-line names/goals. */
+  labelBarGap: 4,
   /** Agent name label width multiplier of radius */
   labelWidthMultiplier: 3,
   /** Scanline gradient half-height */
@@ -285,22 +305,6 @@ export const CONTEXT_BAR = {
   labelPadding: 9,
 } as const
 
-export const CONTEXT_RING = {
-  /** Ring offset from agent radius */
-  ringOffset: 8,
-  ringWidth: 4,
-  /** Warning threshold ratios */
-  warningThreshold: 0.8,
-  criticalThreshold: 0.9,
-  /** Show percentage label above this usage ratio */
-  percentLabelThreshold: 0.7,
-  /** Warning glow extra radius */
-  glowPadding: 4,
-  glowLineWidth: 2,
-  glowBlur: 6,
-  /** Percentage label Y offset from radius */
-  percentYOffset: 10,
-} as const
 
 export const STATS_OVERLAY = {
   /** Y offset above agent radius */

@@ -3,9 +3,39 @@ import { NODE } from '@/lib/agent-types'
 import {
   BUBBLE_MAX_W, BUBBLE_GAP,
   TOOL_MAX_CARD_W, getDiscoveryCardDimensions,
-  AGENT_DRAW, HIT_DETECTION, BUBBLE_DRAW, TOOL_DRAW,
+  AGENT_DRAW, HIT_DETECTION, BUBBLE_DRAW, TOOL_DRAW, NODE_DRAW,
 } from '@/lib/canvas-constants'
 import { bubbleAlpha } from './bubble-utils'
+
+/**
+ * Find which agent's NAME LABEL (the text drawn just below the node) is at the
+ * given canvas-space coordinates. Returns the agent id, or null.
+ *
+ * Geometry mirrors drawAgentLabel: the label starts at `agent.y + half +
+ * labelYOffset` and spans the name line plus an optional subtitle line, centered
+ * on the node. `half` uses the resting size (breathing/scale ≈ 1); the hit box is
+ * intentionally generous so the name is easy to tap. Used to open inline rename
+ * on a tap of the name (distinct from tapping the node body, which selects it).
+ */
+export function findAgentLabelAt(
+  x: number,
+  y: number,
+  agents: Map<string, Agent>,
+): string | null {
+  for (const [id, agent] of agents) {
+    if (agent.opacity < 0.3) continue
+    const radius = agent.isMain ? NODE.radiusMain : NODE.radiusSub
+    const half = radius * NODE_DRAW.halfScale
+    const nameY = agent.y + half + AGENT_DRAW.labelYOffset
+    // Covers the wrapped name block (≤2 lines) plus an optional wrapped goal
+    // subtitle (≤2 lines) — matches drawAgentLabel's max height.
+    const top = nameY - 2
+    const bottom = nameY + 56
+    const hitHalfW = Math.max(half * 3.5, 60)
+    if (x >= agent.x - hitHalfW && x <= agent.x + hitHalfW && y >= top && y <= bottom) return id
+  }
+  return null
+}
 
 /**
  * Find which agent (if any) is at the given canvas-space coordinates.

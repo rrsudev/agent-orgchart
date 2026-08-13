@@ -18,7 +18,7 @@ Claude Code is powerful, but its execution is a black box — you see the final 
 ## Features
 
 - **Live agent visualization**: Watch agent execution as an interactive node graph with real-time tool calls, branching, and return flows
-- **Claude Code + Codex**: Auto-detects sessions from both runtimes concurrently and shows them side-by-side, or restrict to one via the `agentVisualizer.runtime` setting
+- **Claude Code + Codex**: Auto-detects sessions from both runtimes concurrently and shows them side-by-side, or restrict to one via the `agentFlowStudy.runtime` setting
 - **Claude Code hooks**: Lightweight HTTP hook server receives events directly from Claude Code for zero-latency streaming
 - **Codex rollout tailing**: Reads `~/.codex/sessions/**/rollout-*.jsonl` (respects `CODEX_HOME`) and surfaces tool calls, reasoning, and authoritative token counts from Codex's own event stream
 - **Multi-session support**: Track multiple concurrent agent sessions with tabs
@@ -67,7 +67,7 @@ By default Agent Flow watches both Claude Code (`~/.claude/projects/`) and Codex
 
 To restrict to one runtime:
 
-- **VS Code extension:** set `agentVisualizer.runtime` to `"auto"` / `"claude"` / `"codex"` in your settings
+- **VS Code extension:** set `agentFlowStudy.runtime` to `"auto"` / `"claude"` / `"codex"` in your settings
 - **`pnpm run dev` and `npx agent-flow-app`:** set the `AGENT_FLOW_RUNTIME` environment variable to `claude` or `codex` (defaults to watching both)
 
 For non-default Codex installs, set the `CODEX_HOME` environment variable.
@@ -76,7 +76,7 @@ For non-default Codex installs, set the `CODEX_HOME` environment variable.
 
 You can also point Agent Flow at a JSONL event log file:
 
-1. Set `agentVisualizer.eventLogPath` in your VS Code settings to the path of a `.jsonl` file
+1. Set `agentFlowStudy.eventLogPath` in your VS Code settings to the path of a `.jsonl` file
 2. Agent Flow will tail the file and visualize events as they arrive
 
 ## Commands
@@ -98,10 +98,10 @@ You can also point Agent Flow at a JSONL event log file:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `agentVisualizer.runtime` | `"auto"` | Which agent runtime(s) to watch: `"auto"` (both), `"claude"`, or `"codex"` |
-| `agentVisualizer.devServerPort` | `0` | Development server port (0 = production mode) |
-| `agentVisualizer.eventLogPath` | `""` | Path to a JSONL event log file to watch |
-| `agentVisualizer.autoOpen` | `false` | Auto-open when an agent session starts |
+| `agentFlowStudy.runtime` | `"auto"` | Which agent runtime(s) to watch: `"auto"` (both), `"claude"`, or `"codex"` |
+| `agentFlowStudy.devServerPort` | `0` | Development server port (0 = production mode) |
+| `agentFlowStudy.eventLogPath` | `""` | Path to a JSONL event log file to watch |
+| `agentFlowStudy.autoOpen` | `false` | Auto-open when an agent session starts |
 
 ## Requirements
 

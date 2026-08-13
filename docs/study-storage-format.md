@@ -29,6 +29,12 @@ study-storage/
   README.md                     # this document (shipped inside the folder)
   MANIFEST.json                 # participant + consent + tool/schema versions + machine + capture window
   study.sqlite                  # queryable index over ALL sessions, live + backfill (single-file SQLite DB)
+  study-sessions.jsonl          # append-only marker log of EVERY study-session action (start/pause/resume/end/protocol)
+  study-sessions/               # one folder per participant "work period" (see below)
+    <NNN>-<id>/
+      session.json              # timings, running duration, 15-min protocol status, tabs used
+      events.jsonl              # the event-stream slice captured during this session's window
+      lifecycle.jsonl           # this session's own start/pause/resume/end markers
   live/                         # sessions captured in real time after install
     sessions/
       <runtime>-<session-uuid>/  # ONE folder per tab/session
@@ -109,6 +115,34 @@ derives structured turns / tool-calls / tokens uniformly for live and backfill.
   }
 }
 ```
+
+---
+
+## Study sessions (participant work periods)
+
+Distinct from the per-tab folders above, the tool also records the participant's
+**timed study sessions** — the "work period" they start, pause, resume, and end
+from the UI (the study protocol asks for ≥15 minutes of active time per session).
+The session clock only advances while running; pausing does not accrue time.
+
+- **`study-sessions.jsonl`** (top level) — an append-only, chronological marker
+  log of *every* action, so a session boundary is never ambiguous. Each line:
+  `{ capturedAt, action, studySessionId, sessionNumber, at, elapsedMs, reason?, agentSessionIds?, protocolMinimumMs? }`
+  where `action` ∈ `started | paused | resumed | ended | protocol-reached`.
+- **`study-sessions/<NNN>-<id>/`** — one folder per session (`NNN` = zero-padded
+  session number):
+  - `session.json` — `{ studySessionId, sessionNumber, participantId, startedAt,
+    endedAt, status (active|paused|ended), endReason, accumulatedRunningMs,
+    protocolMinimumMs, protocolReachedAt, protocolSatisfied, agentSessionIds[],
+    eventCount }`.
+  - `events.jsonl` — the slice of the normalized event stream captured while this
+    session was active (the same events also live in the per-tab folders).
+  - `lifecycle.jsonl` — this session's own subset of the marker log.
+
+This is an **additional** view, not a replacement: the per-tab `live/` folders
+keep capturing continuously, so a participant's actions *beyond* a session's
+official end (they may keep working past the allotted time) remain fully
+recoverable there, while the marker log pins exactly when each session ran.
 
 ---
 

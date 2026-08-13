@@ -10,6 +10,7 @@ import { exec, execFile } from 'child_process'
 import { createRelay } from '../../scripts/relay'
 import { createTelemetryClient } from '../../scripts/telemetry'
 import { serveStatic } from './static'
+import { handleStudySessionPost } from '../../scripts/study-session-endpoint'
 
 interface ServerOptions {
   port: number
@@ -34,6 +35,12 @@ export async function startServer(options: ServerOptions) {
     // SSE endpoint
     if (req.url === '/events') {
       return relay.handleSSE(req, res)
+    }
+
+    // Study-session lifecycle log (from the web UI; only meaningful when capture
+    // is enabled via AGENT_FLOW_STUDY_STORAGE — otherwise a harmless no-op).
+    if (req.method === 'POST' && req.url === '/study-session') {
+      return handleStudySessionPost(req, res, relay)
     }
 
     // Static files (UI)

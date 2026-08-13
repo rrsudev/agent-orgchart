@@ -21,7 +21,7 @@ function getNonce(): string {
 }
 
 export class VisualizerPanel implements vscode.Disposable {
-  public static readonly viewType = 'agentVisualizer'
+  public static readonly viewType = 'agentFlowStudy'
   private static instance: VisualizerPanel | undefined
 
   private readonly panel: vscode.WebviewPanel
@@ -136,13 +136,13 @@ export class VisualizerPanel implements vscode.Disposable {
 
   private isDevelopmentMode(): boolean {
     // Only use dev mode if the user explicitly set a port in settings
-    const config = vscode.workspace.getConfiguration('agentVisualizer')
+    const config = vscode.workspace.getConfiguration('agentFlowStudy')
     const port = config.get<number>('devServerPort', 0)
     return port > 0
   }
 
   private getDevHtml(): string {
-    const config = vscode.workspace.getConfiguration('agentVisualizer')
+    const config = vscode.workspace.getConfiguration('agentFlowStudy')
     const port = config.get<number>('devServerPort', DEFAULT_DEV_PORT)
     const nonce = getNonce()
 

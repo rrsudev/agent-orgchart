@@ -14,6 +14,39 @@ export function truncateText(ctx: CanvasRenderingContext2D, text: string, maxWid
   return lo > 0 ? text.slice(0, lo) + '\u2026' : '\u2026'
 }
 
+/**
+ * Word-wrap `text` into at most `maxLines` lines that each fit `maxWidth` px.
+ * Greedy fill; the final line is ellipsis-truncated if any text remains, so the
+ * result never exceeds `maxLines`. Assumes `ctx.font` is already set.
+ */
+export function wrapTextLines(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+  maxLines: number,
+): string[] {
+  const words = text.split(/\s+/).filter(Boolean)
+  if (words.length === 0) return []
+  const lines: string[] = []
+  let line = ''
+  for (let i = 0; i < words.length; i++) {
+    const candidate = line ? line + ' ' + words[i] : words[i]
+    if (line && measureTextCached(ctx, candidate) > maxWidth) {
+      // Line is full. If it's the last one we're allowed, cram the remaining
+      // words on and ellipsis-truncate to fit.
+      if (lines.length === maxLines - 1) {
+        return [...lines, truncateText(ctx, line + ' ' + words.slice(i).join(' '), maxWidth)]
+      }
+      lines.push(line)
+      line = words[i]
+    } else {
+      line = candidate
+    }
+  }
+  lines.push(line)
+  return lines
+}
+
 export function drawTetherLine(ctx: CanvasRenderingContext2D, agent: Agent, transform: { x: number; y: number; scale: number }, canvasH: number) {
   const r = agent.isMain ? NODE.radiusMain : NODE.radiusSub
 

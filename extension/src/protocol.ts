@@ -30,10 +30,40 @@ export interface AgentEvent {
 
 export interface SessionInfo {
   id: string
+  /** Goal summary — tab-name fallback / short contexts. No longer 2-word-capped;
+   *  mirrors the fuller `goal` below. */
   label: string
+  /** Fuller goal text (untruncated AI title or first user message, capped) —
+   *  surfaced as the node subtitle preview + full-goal hover. Optional for
+   *  backward/cross-runtime compat. */
+  goal?: string
   status: 'active' | 'completed'
   startTime: number
   lastActivityTime: number
+}
+
+/**
+ * Study-session lifecycle record — a wall-clock "work period" the participant
+ * runs, pauses, and ends, independent of the agent/transcript sessions (tabs).
+ * Emitted from the web UI (webview→extension / relay POST) and logged
+ * distinctively by StudyStorage.
+ *
+ * Mirrors StudySessionLifecycle in web/lib/bridge-types.ts — keep in sync.
+ */
+export type StudySessionAction = 'started' | 'paused' | 'resumed' | 'ended' | 'protocol-reached'
+
+export interface StudySessionLifecycle {
+  action: StudySessionAction
+  studySessionId: string
+  sessionNumber: number
+  /** ISO wall-clock time this record was produced. */
+  at: string
+  /** Accumulated *running* time (ms) at this moment — excludes paused spans. */
+  elapsedMs: number
+  reason?: string
+  /** Agent/transcript session ids open during this study session. */
+  agentSessionIds?: string[]
+  protocolMinimumMs?: number
 }
 
 // ─── Extension → Webview Messages ────────────────────────────────────────────
@@ -47,13 +77,15 @@ export type ExtensionToWebviewMessage =
   | { type: 'session-list'; sessions: SessionInfo[] }
   | { type: 'session-started'; session: SessionInfo }
   | { type: 'session-ended'; sessionId: string }
-  | { type: 'session-updated'; sessionId: string; label: string }
+  | { type: 'session-updated'; sessionId: string; label: string; goal?: string }
 
 export interface VisualizerConfig {
   mode: 'live' | 'replay'
   autoPlay: boolean
   showMockData: boolean
   disable1MContext: boolean
+  /** URL the 15-minute study-protocol popup opens ("record your steps"). */
+  studyWebsiteUrl: string
 }
 
 // ─── Webview → Extension Messages ────────────────────────────────────────────
@@ -63,6 +95,8 @@ export type WebviewToExtensionMessage =
   | { type: 'request-connect' }
   | { type: 'request-disconnect' }
   | { type: 'open-file'; filePath: string; line?: number }
+  | { type: 'open-external'; url: string }
+  | { type: 'study-session'; payload: StudySessionLifecycle }
   | { type: 'log'; level: 'info' | 'warn' | 'error'; message: string }
 
 // ─── Transcript Types (from Claude Code JSONL files) ─────────────────────────
@@ -159,6 +193,9 @@ export interface PendingToolCall {
 export interface SubagentState {
   watcher: import('fs').FSWatcher | null
   fileSize: number
+  /** Bytes after the last newline of the previous read, carried forward so a
+   *  transcript line split across reads isn't dropped (see readNewFileLines). */
+  fileTail: string
   agentName: string
   /** Friendly display label (e.g. "Explore · …"); agentName stays the identity. */
   displayName?: string
@@ -176,6 +213,9 @@ export interface WatchedSession {
   fileWatcher: import('fs').FSWatcher | null
   pollTimer: NodeJS.Timeout | null
   fileSize: number
+  /** Bytes after the last newline of the previous read, carried forward so a
+   *  transcript line split across reads isn't dropped (see readNewFileLines). */
+  fileTail: string
   sessionStartTime: number
   pendingToolCalls: Map<string, PendingToolCall>
   seenToolUseIds: Set<string>
@@ -192,6 +232,8 @@ export interface WatchedSession {
   subagentsDirWatcher: import('fs').FSWatcher | null
   subagentsDir: string | null
   label: string
+  /** Fuller goal text (untruncated AI title / first user message, capped). */
+  goal?: string
   labelSet: boolean
   /** True once the label came from Claude's ai-title entry — a later first-user
    *  message must not override it. */

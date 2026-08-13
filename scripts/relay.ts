@@ -9,7 +9,7 @@ import * as path from 'path'
 import * as os from 'os'
 
 import { HookServer } from '../extension/src/hook-server'
-import { AgentEvent, SessionInfo, WatchedSession } from '../extension/src/protocol'
+import { AgentEvent, SessionInfo, WatchedSession, StudySessionLifecycle } from '../extension/src/protocol'
 import { TranscriptParser } from '../extension/src/transcript-parser'
 import { readNewFileLines, foldPathCase } from '../extension/src/fs-utils'
 import { scanSubagentsDir, readSubagentNewLines } from '../extension/src/subagent-watcher'
@@ -443,6 +443,8 @@ function removeDiscoveryFile() {
 export interface Relay {
   /** Handle an incoming SSE connection */
   handleSSE: (req: http.IncomingMessage, res: http.ServerResponse) => void
+  /** Log a study-session lifecycle record from the web UI (no-op if capture off). */
+  recordStudySession: (payload: StudySessionLifecycle) => void
   /** Clean up all resources */
   dispose: () => void
 }
@@ -630,6 +632,10 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
           sendSSE(res, { type: 'agent-event-batch', events: buffered })
         }
       }
+    },
+
+    recordStudySession(payload: StudySessionLifecycle) {
+      studyStorage?.recordStudySessionLifecycle(payload)
     },
 
     dispose() {

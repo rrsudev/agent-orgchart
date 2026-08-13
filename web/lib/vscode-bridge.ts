@@ -6,14 +6,14 @@
  * between the React app and the extension host.
  */
 
-export type { AgentEvent, SessionInfo, ConnectionStatus } from './bridge-types'
-import type { AgentEvent, SessionInfo, ConnectionStatus } from './bridge-types'
+export type { AgentEvent, SessionInfo, ConnectionStatus, StudySessionLifecycle } from './bridge-types'
+import type { AgentEvent, SessionInfo, ConnectionStatus, StudySessionLifecycle } from './bridge-types'
 
 type InitCallback = () => void
 type EventCallback = (event: AgentEvent) => void
 type StatusCallback = (status: ConnectionStatus, source: string) => void
-type ConfigCallback = (config: Partial<{ mode: string; autoPlay: boolean; showMockData: boolean; disable1MContext: boolean }>) => void
-type SessionCallback = (type: 'list' | 'started' | 'ended' | 'updated' | 'reset', data: SessionInfo[] | SessionInfo | string | { sessionId: string; label: string }) => void
+type ConfigCallback = (config: Partial<{ mode: string; autoPlay: boolean; showMockData: boolean; disable1MContext: boolean; studyWebsiteUrl: string }>) => void
+type SessionCallback = (type: 'list' | 'started' | 'ended' | 'updated' | 'reset', data: SessionInfo[] | SessionInfo | string | { sessionId: string; label: string; goal?: string }) => void
 
 class VSCodeBridge {
   private _isVSCode = false
@@ -98,7 +98,7 @@ class VSCodeBridge {
 
       case 'session-updated':
         for (const cb of this.sessionListeners) {
-          cb('updated', { sessionId: data.sessionId, label: data.label })
+          cb('updated', { sessionId: data.sessionId, label: data.label, goal: data.goal })
         }
         break
     }
@@ -147,6 +147,18 @@ class VSCodeBridge {
 
   openFile(filePath: string, line?: number): void {
     this.postToExtension({ type: 'open-file', filePath, line })
+  }
+
+  /** Open an external URL through the host (VS Code opens it in the browser). */
+  openExternal(url: string): void {
+    this.postToExtension({ type: 'open-external', url })
+  }
+
+  /** Forward a study-session lifecycle record to the host for on-disk logging.
+   *  No-op when not running inside VS Code (the standalone path POSTs to the
+   *  relay instead — see use-vscode-bridge). */
+  sendStudySession(payload: StudySessionLifecycle): void {
+    this.postToExtension({ type: 'study-session', payload })
   }
 
   private postToExtension(message: Record<string, unknown>): void {

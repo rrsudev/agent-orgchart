@@ -199,6 +199,7 @@ export const Z = {
   transcriptPanel: 60,
   detailCard: 100,
   contextMenu: 200,
+  tooltip: 300,
 } as const
 
 // ─── Animation Constants ─────────────────────────────────────────────────────

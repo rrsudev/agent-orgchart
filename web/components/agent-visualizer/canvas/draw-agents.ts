@@ -1,10 +1,10 @@
 import { Agent, NODE, ANIM, AgentState } from '@/lib/agent-types'
 import { COLORS, getStateColor, contextSegments, washOverWhite } from '@/lib/colors'
 import {
-  AGENT_DRAW, CONTEXT_BAR, CONTEXT_RING, STATS_OVERLAY, NODE_DRAW, CANVAS_FONT, PREFERS_REDUCED_MOTION,
+  AGENT_DRAW, CONTEXT_BAR, STATS_OVERLAY, NODE_DRAW, CANVAS_FONT, PREFERS_REDUCED_MOTION,
 } from '@/lib/canvas-constants'
 import { formatTokens } from '@/lib/utils'
-import { truncateText, drawSquircle, CLAUDE_SPARK_D, OPENAI_LOGO_D, OPENAI_LOGO_VIEWBOX } from './draw-misc'
+import { wrapTextLines, drawSquircle, CLAUDE_SPARK_D, OPENAI_LOGO_D, OPENAI_LOGO_VIEWBOX } from './draw-misc'
 
 let _claudeSparkPath: Path2D | null = null
 export function getClaudeSparkPath() {
@@ -55,6 +55,10 @@ export function drawContextComposition(
   ctx: CanvasRenderingContext2D,
   agent: Agent,
   radius: number,
+  /** Push the bar down (e.g. to clear a goal subtitle drawn under the node). */
+  extraYOffset = 0,
+  /** Show the "X / Y tokens" numeric readout (toggleable). */
+  showCount = true,
 ) {
   const bd = agent.contextBreakdown
   const total = agent.tokensUsed
@@ -63,7 +67,7 @@ export function drawContextComposition(
   const barWidth = Math.max(CONTEXT_BAR.minWidth, radius * CONTEXT_BAR.widthMultiplier)
   const barHeight = CONTEXT_BAR.barHeight
   const barX = agent.x - barWidth / 2
-  const barY = agent.y + radius + CONTEXT_BAR.yOffset
+  const barY = agent.y + radius + CONTEXT_BAR.yOffset + extraYOffset
 
   // Background
   ctx.fillStyle = COLORS.cardBgDark
@@ -71,11 +75,13 @@ export function drawContextComposition(
   ctx.roundRect(barX - 2, barY - 2, barWidth + 4, barHeight + 14, CONTEXT_BAR.borderRadius)
   ctx.fill()
 
-  // Label — tabular metric, keep monospace
-  ctx.fillStyle = COLORS.textMuted
-  ctx.font = `${CONTEXT_BAR.fontSize}px ${CANVAS_FONT.mono}`
-  ctx.textAlign = 'center'
-  ctx.fillText(`${formatTokens(total)} / ${formatTokens(agent.tokensMax)} tokens`, agent.x, barY + barHeight + CONTEXT_BAR.labelPadding)
+  // Label — tabular metric, keep monospace. Toggleable ("token count").
+  if (showCount) {
+    ctx.fillStyle = COLORS.textMuted
+    ctx.font = `${CONTEXT_BAR.fontSize}px ${CANVAS_FONT.mono}`
+    ctx.textAlign = 'center'
+    ctx.fillText(`${formatTokens(total)} / ${formatTokens(agent.tokensMax)} tokens`, agent.x, barY + barHeight + CONTEXT_BAR.labelPadding)
+  }
 
   // Segments
   const segments = contextSegments(bd)
@@ -100,69 +106,6 @@ export function drawContextComposition(
   ctx.strokeStyle = COLORS.glassBorder
   ctx.lineWidth = 0.5
   ctx.strokeRect(barX, barY, barWidth, barHeight)
-}
-
-export function drawContextRing(
-  ctx: CanvasRenderingContext2D,
-  agent: Agent,
-  radius: number,
-  time: number,
-) {
-  const bd = agent.contextBreakdown
-  const total = agent.tokensUsed
-  if (total <= 0) return
-
-  const usage = total / agent.tokensMax
-  const ringR = radius + CONTEXT_RING.ringOffset
-  const ringW = CONTEXT_RING.ringWidth
-  const startAngle = -Math.PI / 2
-
-  // Background ring (empty capacity)
-  ctx.beginPath()
-  ctx.arc(agent.x, agent.y, ringR, 0, Math.PI * 2)
-  ctx.strokeStyle = COLORS.holoBorder06
-  ctx.lineWidth = ringW
-  ctx.stroke()
-
-  // Filled segments
-  const segments = contextSegments(bd)
-
-  let currentAngle = startAngle
-  for (const seg of segments) {
-    if (seg.value <= 0) continue
-    const sweep = (seg.value / agent.tokensMax) * Math.PI * 2
-    ctx.beginPath()
-    ctx.arc(agent.x, agent.y, ringR, currentAngle, currentAngle + sweep)
-    ctx.strokeStyle = seg.color
-    ctx.lineWidth = ringW
-    ctx.stroke()
-    currentAngle += sweep
-  }
-
-  // Subtle warning at high usage (no luminance glow — a slightly heavier ring)
-  if (usage > CONTEXT_RING.warningThreshold) {
-    const warningColor = usage > CONTEXT_RING.criticalThreshold ? COLORS.error : COLORS.tool
-    const pulse = PREFERS_REDUCED_MOTION ? 0 : Math.sin(time * (usage > CONTEXT_RING.criticalThreshold ? 6 : 3))
-    const intensity = (usage > CONTEXT_RING.criticalThreshold ? 0.4 : 0.22) + pulse * 0.1
-
-    ctx.save()
-    ctx.beginPath()
-    ctx.arc(agent.x, agent.y, ringR + CONTEXT_RING.glowPadding, 0, Math.PI * 2)
-    ctx.strokeStyle = warningColor
-    ctx.lineWidth = CONTEXT_RING.glowLineWidth
-    ctx.globalAlpha = Math.max(0, intensity)
-    ctx.stroke()
-    ctx.restore()
-  }
-
-  // Percentage label when usage is high — tabular, monospace
-  if (usage > CONTEXT_RING.percentLabelThreshold) {
-    ctx.font = `${CONTEXT_BAR.fontSize}px ${CANVAS_FONT.mono}`
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'bottom'
-    ctx.fillStyle = usage > CONTEXT_RING.criticalThreshold ? COLORS.error : usage > CONTEXT_RING.warningThreshold ? COLORS.tool : COLORS.textDim
-    ctx.fillText(`${Math.floor(usage * 100)}%`, agent.x, agent.y - radius - CONTEXT_RING.percentYOffset)
-  }
 }
 
 // ─── State color cross-fade ──────────────────────────────────────────────────
@@ -323,15 +266,45 @@ function drawStateBadge(
   drawStateGlyph(ctx, bx, by, br * 0.55, agent.state, time)
 }
 
-function drawAgentLabel(ctx: CanvasRenderingContext2D, agent: Agent, half: number, isHovered: boolean, name: string) {
-  ctx.fillStyle = isHovered ? COLORS.textPrimary : COLORS.textDim
-  // Type carries hierarchy through weight + size, on the system stack.
-  ctx.font = `600 12px ${CANVAS_FONT.sans}`
+/**
+ * Draw the node's name + optional goal subtitle beneath it, each word-wrapped to
+ * up to two lines so several words are legible at a glance (the full, untruncated
+ * task still lives in the detail card). Returns the absolute Y of the bottom of
+ * the label block, so the caller can push the token bar below it.
+ */
+function drawAgentLabel(ctx: CanvasRenderingContext2D, agent: Agent, half: number, isHovered: boolean, name: string, subtitle?: string, showSubtitle = false): number {
   ctx.textAlign = 'center'
   ctx.textBaseline = 'top'
-  const maxLabelW = half * 3
-  const agentLabel = truncateText(ctx, name, maxLabelW)
-  ctx.fillText(agentLabel, agent.x, agent.y + half + AGENT_DRAW.labelYOffset)
+  // Generous widths, still well inside the ~200px inter-node spacing. The goal
+  // gets a wider box + smaller type so several words fit across its two lines.
+  const nameMaxW = half * 5
+  const goalMaxW = half * 7
+  const nameLineH = 14
+  const goalLineH = 10.5
+  let y = agent.y + half + AGENT_DRAW.labelYOffset
+
+  // Primary name — up to 2 lines. Type carries hierarchy through weight + size.
+  ctx.fillStyle = isHovered ? COLORS.textPrimary : COLORS.textDim
+  ctx.font = `600 12px ${CANVAS_FONT.sans}`
+  for (const line of wrapTextLines(ctx, name, nameMaxW, 2)) {
+    ctx.fillText(line, agent.x, y)
+    y += nameLineH
+  }
+
+  // Optional goal subtitle — dim, smaller, up to 2 lines (main-agent nodes only).
+  // Off by default (the hover tooltip is the usual way to read the goal); shown
+  // inline only when the user toggles sublabels on.
+  if (subtitle && showSubtitle) {
+    y += AGENT_DRAW.subtitleGap
+    ctx.fillStyle = COLORS.textMuted
+    ctx.font = `500 8.5px ${CANVAS_FONT.sans}`
+    for (const line of wrapTextLines(ctx, subtitle, goalMaxW, 2)) {
+      ctx.fillText(line, agent.x, y)
+      y += goalLineH
+    }
+  }
+
+  return y
 }
 
 function drawStatsOverlay(ctx: CanvasRenderingContext2D, agent: Agent, radius: number) {
@@ -359,6 +332,9 @@ export function drawAgents(
   time: number,
   agentColors?: Map<string, string>,
   agentNames?: Map<string, string>,
+  agentSubtitles?: Map<string, string>,
+  showTokens = true,
+  showSubtitles = false,
 ) {
   const dt = Math.min(0.1, Math.max(0, time - lastColorTime))
   lastColorTime = time
@@ -369,6 +345,7 @@ export function drawAgents(
     // User identity color → soft card-fill wash (orthogonal to the state color).
     const userColor = agentColors?.get(id)
     const label = agentNames?.get(id) ?? agent.name
+    const subtitle = agentSubtitles?.get(id)
     const cardFill = userColor ? washOverWhite(userColor, 0.18) : '#ffffff'
     const isHovered = id === hoveredAgentId
     const isSelected = id === selectedAgentId
@@ -391,14 +368,16 @@ export function drawAgents(
     drawNodeCard(ctx, agent, half, color, cardFill, isHovered, isSelected, isWaiting, time)
     drawAgentBrand(ctx, agent.x, agent.y, half * 2.2, COLORS.textPrimary, agent.runtime)
     drawStateBadge(ctx, agent, radius, half, color, time)
-    drawAgentLabel(ctx, agent, half, isHovered, label)
+    const labelBottom = drawAgentLabel(ctx, agent, half, isHovered, label, subtitle, showSubtitles)
 
-    // Context composition — ring for main agent, bar for all
-    if (agent.state !== 'complete' || agent.opacity > 0.5) {
-      if (agent.isMain) {
-        drawContextRing(ctx, agent, radius, time)
-      }
-      drawContextComposition(ctx, agent, radius)
+    // Token/context bar — user-toggleable (showTokens). The context ring was
+    // removed; the bar is the only token readout now. When off, nothing is drawn.
+    if (showTokens && (agent.state !== 'complete' || agent.opacity > 0.5)) {
+      // Push the bar below the (multi-line, variable-height) label so it never
+      // overlaps a wrapped name/goal.
+      const barBaseY = agent.y + radius + CONTEXT_BAR.yOffset
+      const reserve = Math.max(0, labelBottom + AGENT_DRAW.labelBarGap - barBaseY)
+      drawContextComposition(ctx, agent, radius, reserve, true)
     }
 
     if (showStats && agent.state !== 'complete') {

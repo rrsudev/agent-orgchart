@@ -5,6 +5,7 @@
  */
 import * as http from 'http'
 import { createRelay } from './relay'
+import { handleStudySessionPost } from './study-session-endpoint'
 import { DEFAULT_RELAY_PORT, DEV_WEB_ORIGIN_PATTERN } from '../extension/src/constants'
 
 async function main() {
@@ -23,7 +24,7 @@ async function main() {
       res.setHeader('Access-Control-Allow-Origin', origin)
       res.setHeader('Vary', 'Origin')
     }
-    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS')
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
 
     if (req.method === 'OPTIONS') {
@@ -34,6 +35,10 @@ async function main() {
 
     if (req.url === '/events') {
       return relay.handleSSE(req, res)
+    }
+
+    if (req.method === 'POST' && req.url === '/study-session') {
+      return handleStudySessionPost(req, res, relay)
     }
 
     res.writeHead(200, { 'Content-Type': 'text/plain' })

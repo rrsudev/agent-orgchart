@@ -19,7 +19,7 @@ let runtimes: AgentRuntime[] = []
 let studyStorage: StudyStorage | null = null
 
 function readConfiguredMode(): ConfiguredRuntimeMode {
-  const raw = vscode.workspace.getConfiguration('agentVisualizer').get<string>('runtime', 'auto')
+  const raw = vscode.workspace.getConfiguration('agentFlowStudy').get<string>('runtime', 'auto')
   return raw === 'claude' || raw === 'codex' ? raw : 'auto'
 }
 
@@ -73,7 +73,7 @@ export async function activate(context: vscode.ExtensionContext) {
   // ─── Commands ──────────────────────────────────────────────────────────────
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('agentVisualizer.open', () => {
+    vscode.commands.registerCommand('agentFlowStudy.open', () => {
       const panel = VisualizerPanel.create(context.extensionUri, vscode.ViewColumn.One)
       wirePanel(panel)
       promptHookSetupIfNeededForClaude(context)
@@ -81,7 +81,7 @@ export async function activate(context: vscode.ExtensionContext) {
   )
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('agentVisualizer.openToSide', () => {
+    vscode.commands.registerCommand('agentFlowStudy.openToSide', () => {
       const panel = VisualizerPanel.create(context.extensionUri, vscode.ViewColumn.Beside)
       wirePanel(panel)
       promptHookSetupIfNeededForClaude(context)
@@ -89,7 +89,7 @@ export async function activate(context: vscode.ExtensionContext) {
   )
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('agentVisualizer.connectToAgent', async () => {
+    vscode.commands.registerCommand('agentFlowStudy.connectToAgent', async () => {
       const choice = await vscode.window.showQuickPick(
         [
           { label: '$(radio-tower) Claude Code Hooks', description: 'Auto-configure hooks for live streaming', value: 'hooks' },
@@ -125,7 +125,7 @@ export async function activate(context: vscode.ExtensionContext) {
   )
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('agentVisualizer.configureHooks', async () => {
+    vscode.commands.registerCommand('agentFlowStudy.configureHooks', async () => {
       await configureClaudeHooks()
     }),
   )
@@ -133,13 +133,13 @@ export async function activate(context: vscode.ExtensionContext) {
   // ─── Study capture commands ────────────────────────────────────────────────
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('agentVisualizer.revealStudyFolder', () => {
+    vscode.commands.registerCommand('agentFlowStudy.revealStudyFolder', () => {
       revealStudyFolder(studyStorage)
     }),
   )
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('agentVisualizer.packageStudyData', async () => {
+    vscode.commands.registerCommand('agentFlowStudy.packageStudyData', async () => {
       await packageStudyData(studyStorage)
     }),
   )
@@ -200,8 +200,14 @@ function wirePanel(panel: VisualizerPanel): void {
         // Clear stale webview state from any previous panel instance
         panel.postMessage({ type: 'reset', reason: 'panel-reopened' })
         // Send environment-derived config (e.g. CLAUDE_CODE_DISABLE_1M_CONTEXT)
-        if (isDisable1MContext()) {
-          panel.postMessage({ type: 'config', config: { disable1MContext: true } })
+        // plus the study-website URL the 15-minute protocol popup opens.
+        const cfg = vscode.workspace.getConfiguration('agentFlowStudy')
+        const studyWebsiteUrl = cfg.get<string>('studyWebsiteUrl', '').trim()
+        const config: Record<string, unknown> = {}
+        if (isDisable1MContext()) config.disable1MContext = true
+        if (studyWebsiteUrl) config.studyWebsiteUrl = studyWebsiteUrl
+        if (Object.keys(config).length > 0) {
+          panel.postMessage({ type: 'config', config })
         }
         // Report current connection status and replay active sessions
         // Send session list FIRST so the webview selects a session
@@ -216,7 +222,7 @@ function wirePanel(panel: VisualizerPanel): void {
         break
 
       case 'request-connect':
-        vscode.commands.executeCommand('agentVisualizer.connectToAgent')
+        vscode.commands.executeCommand('agentFlowStudy.connectToAgent')
         break
 
       case 'request-disconnect':
@@ -226,6 +232,16 @@ function wirePanel(panel: VisualizerPanel): void {
 
       case 'open-file':
         handleOpenFile(message.filePath, message.line)
+        break
+
+      case 'open-external':
+        try { void vscode.env.openExternal(vscode.Uri.parse(message.url)) }
+        catch (err) { log.error(`Failed to open external URL: ${message.url}`, err) }
+        break
+
+      case 'study-session':
+        // Distinctive on-disk logging of the participant's session lifecycle.
+        studyStorage?.recordStudySessionLifecycle(message.payload)
         break
 
       case 'log': {

@@ -1,17 +1,24 @@
 /**
  * VS Code glue for the research capture (Phase 3).
  *
- *  - setupStudyStorage(): reads settings, gates on informed consent, and returns
- *    a ready StudyStorage (or null when disabled/declined/no-workspace).
- *  - revealStudyFolder(): open the capture folder in the OS file explorer.
- *  - packageStudyData(): rebuild the index, then zip the folder for the
+ *  - setupStudyStorage(): reads settings and returns a ready StudyStorage
+ *    (or null when disabled or no workspace is open).
+ *  - revealStudyFolder(): open this workspace's capture folder in the OS file explorer.
+ *  - packageStudyData(): rebuild the index, then zip the capture home for the
  *    participant to send (best-effort native zip; falls back to reveal).
  *
- * Capture is off unless `agentVisualizer.studyStorage.enabled` is true AND the
- * participant has consented. Nothing ever leaves the machine automatically.
+ * Informed consent is collected out-of-band at study enrollment (a separate
+ * interface), so the extension never prompts for it — by installing this build
+ * the participant has already accepted recording. Capture is ON by default so
+ * no session is ever lost, and each workspace is written to its own subfolder
+ * under a central capture home (STUDY_STORAGE_BASE), so data stays split by
+ * workspace and is easy to find for later analysis. Nothing ever leaves the
+ * machine automatically.
  */
 import * as vscode from 'vscode'
 import * as path from 'path'
+import * as os from 'os'
+import * as crypto from 'crypto'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 
@@ -22,12 +29,25 @@ import { createLogger } from './logger'
 const log = createLogger('StudyStorage')
 const execFileAsync = promisify(execFile)
 
-const CONSENT_KEY = 'studyStorage.consent'
+/** Central, per-user home for study captures — deliberately OUTSIDE the
+ *  workspace (so it never lands in the participant's git repo) and OUTSIDE
+ *  ~/.claude/agent-flow (which `vscode:uninstall` wipes), so uninstalling the
+ *  extension can never destroy recorded data. */
+const STUDY_STORAGE_BASE = path.join(os.homedir(), '.agent-flow-study')
 
-/** Build the capture sink from settings + consent. Returns null when disabled. */
+/** Filesystem-safe, collision-resistant folder name for a workspace: a readable
+ *  basename plus a short hash of the absolute path (dedupes same-named projects
+ *  in different locations). */
+function workspaceFolderKey(workspaceRoot: string): string {
+  const base = path.basename(workspaceRoot).replace(/[^A-Za-z0-9._-]+/g, '_') || 'workspace'
+  const hash = crypto.createHash('sha256').update(workspaceRoot).digest('hex').slice(0, 8)
+  return `${base}-${hash}`
+}
+
+/** Build the capture sink from settings. Returns null when disabled. */
 export async function setupStudyStorage(context: vscode.ExtensionContext): Promise<StudyStorage | null> {
-  const cfg = vscode.workspace.getConfiguration('agentVisualizer')
-  if (!cfg.get<boolean>('studyStorage.enabled', false)) return null
+  const cfg = vscode.workspace.getConfiguration('agentFlowStudy')
+  if (!cfg.get<boolean>('studyStorage.enabled', true)) return null
 
   const workspace = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
   if (!workspace) {
@@ -35,37 +55,38 @@ export async function setupStudyStorage(context: vscode.ExtensionContext): Promi
     return null
   }
 
-  // Informed consent, scoped to this workspace (per-project capture).
-  const consent = context.workspaceState.get<string>(CONSENT_KEY)
-  if (consent !== 'granted') {
-    if (consent === 'declined') return null // don't re-nag; use the command to enable later
-    const choice = await vscode.window.showInformationMessage(
-      'Agent Flow — research capture',
-      {
-        modal: true,
-        detail:
-          'This research build saves full local copies of your Claude Code sessions for this project — including your prompts, the model\'s output, file contents, and command output — under a "study-storage/" folder, so you can share them with the study researchers.\n\nNothing is uploaded anywhere automatically. You choose when to package and send. You can review or delete any session before sharing.',
-      },
-      'Enable capture', "Don't capture",
-    )
-    if (choice === 'Enable capture') {
-      await context.workspaceState.update(CONSENT_KEY, 'granted')
-    } else {
-      await context.workspaceState.update(CONSENT_KEY, 'declined')
-      return null
-    }
-  }
+  // Default layout: one central capture home, split into a per-workspace
+  // subfolder so every project's data is preserved and easy to find for later
+  // analysis. A configured `studyStorage.path` (relative to the workspace)
+  // overrides this with an exact folder for custom setups.
+  const configuredPath = cfg.get<string>('studyStorage.path', '').trim()
+  const packagingRoot = configuredPath ? path.resolve(workspace, configuredPath) : STUDY_STORAGE_BASE
+  const storageRoot = configuredPath ? packagingRoot : path.join(packagingRoot, workspaceFolderKey(workspace))
 
-  const configuredPath = cfg.get<string>('studyStorage.path', '')
-  const storageRoot = configuredPath
-    ? path.resolve(workspace, configuredPath)
-    : path.join(workspace, 'study-storage')
+  // Visible, persistent signal if capture ever fails — a study can't afford a
+  // silent no-op that looks healthy. Shown only once a failure actually occurs.
+  const captureStatus = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0)
+  context.subscriptions.push(captureStatus)
+  let captureAlerted = false
 
   const storage = new StudyStorage({
     storageRoot,
+    packagingRoot,
     workspaceRoot: workspace,
     participantId: cfg.get<string>('studyStorage.participantId', '') || undefined,
     toolVersion: context.extension?.packageJSON?.version,
+    onError: (summary) => {
+      captureStatus.text = '$(error) Study capture failing'
+      captureStatus.tooltip = `A study-capture write failed (${summary}). See capture-errors.log in the storage folder — recorded data may be incomplete.`
+      captureStatus.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground')
+      captureStatus.show()
+      if (!captureAlerted) {
+        captureAlerted = true
+        void vscode.window.showErrorMessage(
+          `Agent Flow: study capture is failing (${summary}). Recorded data may be incomplete — check capture-errors.log in the storage folder.`,
+        )
+      }
+    },
   })
   storage.init()
   log.info(`Study capture enabled → ${storageRoot}`)
@@ -91,7 +112,11 @@ export async function packageStudyData(storage: StudyStorage | null): Promise<vo
     void vscode.window.showWarningMessage('Agent Flow: study capture is not enabled for this workspace.')
     return
   }
-  const root = storage.getStorageRoot()
+  // Index the current workspace's capture root, but zip the packaging root —
+  // the shared capture home — so every workspace's data ships in one archive
+  // (nothing is lost if the participant worked across several projects).
+  const captureRoot = storage.getStorageRoot()
+  const packageRoot = storage.getPackagingRoot()
 
   await vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: 'Agent Flow: packaging study data…' },
@@ -99,14 +124,14 @@ export async function packageStudyData(storage: StudyStorage | null): Promise<vo
       // Flush the live sessions and rebuild the index so the zip is current.
       storage.dispose()
       if (isSqliteAvailable()) {
-        try { buildIndex(root) } catch (err) { log.debug('index rebuild failed:', err) }
+        try { buildIndex(captureRoot) } catch (err) { log.debug('index rebuild failed:', err) }
       }
 
-      const defaultZip = vscode.Uri.file(path.join(path.dirname(root), 'study-storage.zip'))
+      const defaultZip = vscode.Uri.file(path.join(path.dirname(packageRoot), 'agent-flow-study-data.zip'))
       const dest = await vscode.window.showSaveDialog({ defaultUri: defaultZip, filters: { Zip: ['zip'] } })
       if (!dest) return
 
-      const zipped = await zipFolder(root, dest.fsPath)
+      const zipped = await zipFolder(packageRoot, dest.fsPath)
       if (zipped) {
         const pick = await vscode.window.showInformationMessage(
           `Study data packaged: ${dest.fsPath}\nSend this zip to the researchers.`,
@@ -114,9 +139,9 @@ export async function packageStudyData(storage: StudyStorage | null): Promise<vo
         )
         if (pick) void vscode.commands.executeCommand('revealFileInOS', dest)
       } else {
-        void vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(root))
+        void vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(packageRoot))
         void vscode.window.showInformationMessage(
-          'Agent Flow: could not auto-zip. Please compress the revealed "study-storage" folder and send the zip to the researchers.',
+          'Agent Flow: could not auto-zip. Please compress the revealed capture folder and send the zip to the researchers.',
         )
       }
     },

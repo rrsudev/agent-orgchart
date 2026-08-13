@@ -11,7 +11,7 @@ import {
 import { MOCK_SCENARIO } from '@/lib/mock-scenario'
 import { PARALLEL_VIEW_ID } from '@/lib/bridge-types'
 import { TOOL_CARD_W, TOOL_CARD_H, FORCE, TOOL_SLOT, BUBBLE_VISIBLE_S, MODEL_FAMILY_CONTEXT, DEFAULT_CONTEXT_SIZE, FALLBACK_CONTEXT_SIZE, ANIM_SPEED } from '@/lib/canvas-constants'
-import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide, type Simulation } from 'd3-force'
+import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide, forceX, forceY, type Simulation } from 'd3-force'
 
 import type { SimulationState, ForceNode, ForceLink, UseAgentSimulationOptions } from './simulation/types'
 import { createEmptyState, MAX_EVENT_LOG } from './simulation/types'
@@ -57,6 +57,10 @@ export function useAgentSimulation(options: UseAgentSimulationOptions = {}) {
       .force('charge', forceManyBody().strength(FORCE.chargeStrength))
       .force('center', forceCenter(0, 0).strength(FORCE.centerStrength))
       .force('collide', forceCollide(FORCE.collideRadius))
+      // Inward gravity — pulls disconnected session clusters into a compact
+      // constellation (the parallel view). Collide still prevents overlap.
+      .force('x', forceX(0).strength(FORCE.gravityStrength))
+      .force('y', forceY(0).strength(FORCE.gravityStrength))
       .force('link', forceLink<ForceNode, ForceLink>([]).id(d => d.id).distance(FORCE.linkDistance).strength(FORCE.linkStrength))
       .alphaDecay(FORCE.alphaDecay)
       .velocityDecay(FORCE.velocityDecay)
@@ -186,18 +190,24 @@ export function useAgentSimulation(options: UseAgentSimulationOptions = {}) {
     const deltaTime = Math.min((timestamp - lastTimeRef.current) / 1000, ANIM_SPEED.maxDeltaTime)
     lastTimeRef.current = timestamp
 
+    const prev = frameRef.current
+    if (!prev.isPlaying) {
+      // Paused (review mode, or the brief window between a tab switch and the
+      // cold-start/restore that flips playback back on): DON'T consume external
+      // events here. Leaving them buffered means a subsequent resume / switch
+      // processes them instead of silently dropping them — the latter used to
+      // require a full page reload to recover the missing nodes.
+      animationRef.current = requestAnimationFrame(animateRef.current)
+      return
+    }
+
     // Snapshot and consume external events OUTSIDE the main processing
-    // to avoid React strict mode double-invocation clearing them
+    // to avoid React strict mode double-invocation clearing them. Done only
+    // once we know we're playing, so paused frames never drop events.
     let capturedEvents: SimulationEvent[] | null = null
     if (externalEvents && externalEvents.length > 0 && !useMockData) {
       capturedEvents = externalEvents.slice()
       onExternalEventsConsumed?.()
-    }
-
-    const prev = frameRef.current
-    if (!prev.isPlaying) {
-      animationRef.current = requestAnimationFrame(animateRef.current)
-      return
     }
 
     let newTime = prev.currentTime + deltaTime * prev.speed
@@ -420,6 +430,30 @@ export function useAgentSimulation(options: UseAgentSimulationOptions = {}) {
     setTimeout(() => syncForceSimulation(replayState.agents, replayState.edges), 0)
   }, [processEventWithContext, useMockData, syncForceSimulation, commitState])
 
+  /**
+   * Load a recorded event stream for replay (study-session archive). Preloads
+   * the events into the event log with their original (session-relative) times
+   * and parks the clock at 0, paused, so the control bar's Review scrubber can
+   * play/seek across the whole recording. Unlike a live tab-switch flush (which
+   * collapses buffered events to "now"), this preserves timing so the session
+   * can be re-watched, not just snapped to its end state.
+   */
+  const loadReplay = useCallback((events: SimulationEvent[]) => {
+    blockIdCounter.current = 0
+    skipForceSyncRef.current = false
+    const sorted = [...events].sort((a, b) => a.time - b.time)
+    const maxT = sorted.length > 0 ? sorted[sorted.length - 1].time : 0
+    const next = createEmptyState({
+      isPlaying: false,
+      speed: frameRef.current.speed,
+      eventLog: sorted,
+      eventIndex: 0,
+      currentTime: 0,
+      maxTimeReached: maxT,
+    })
+    commitState(next)
+  }, [commitState])
+
   // ─── Session state save/restore ──────────────────────────────────────────
   const saveSnapshot = useCallback((): { simState: SimulationState; blockId: number } => ({
     simState: frameRef.current,
@@ -447,5 +481,6 @@ export function useAgentSimulation(options: UseAgentSimulationOptions = {}) {
     play, pause, restart, setSpeed, seekToTime,
     updateAgentPosition,
     saveSnapshot, restoreSnapshot,
+    loadReplay,
   }
 }

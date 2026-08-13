@@ -3,6 +3,7 @@ import { Agent, ToolCallNode, Discovery, ANIM } from '@/lib/agent-types'
 import { CAMERA } from '@/lib/canvas-constants'
 import {
   findAgentAt as findAgentAtPure,
+  findAgentLabelAt as findAgentLabelAtPure,
   findToolCallAt as findToolCallAtPure,
   findBubbleAgentAt as findBubbleAgentAtPure,
   findDiscoveryAt as findDiscoveryAtPure,
@@ -17,6 +18,8 @@ interface InteractionCallbacks {
   onToolCallClick?: (toolCallId: string | null) => void
   onDiscoveryClick?: (discoveryId: string | null) => void
   onAgentDoubleClick?: (agentId: string, clientX: number, clientY: number) => void
+  /** Tap on an agent's name label (below the node) → inline rename. */
+  onAgentNameClick?: (agentId: string, clientX: number, clientY: number) => void
 }
 
 interface InteractionOptions {
@@ -72,6 +75,10 @@ export function useCanvasInteraction({
 
   const findDiscoveryAt = useCallback((x: number, y: number): string | null => {
     return findDiscoveryAtPure(x, y, drawPropsRef.current.discoveries)
+  }, [drawPropsRef])
+
+  const findAgentLabelAt = useCallback((x: number, y: number): string | null => {
+    return findAgentLabelAtPure(x, y, drawPropsRef.current.agents)
   }, [drawPropsRef])
 
   // ─── Mouse Handlers ─────────────────────────────────────────────────────
@@ -145,8 +152,12 @@ export function useCanvasInteraction({
       const pos = screenToCanvas(e.clientX, e.clientY)
       const agentId = findAgentAt(pos.x, pos.y)
       const p = drawPropsRef.current
+      const labelAgentId = agentId ? null : findAgentLabelAt(pos.x, pos.y)
       if (agentId) {
         p.onAgentClick(agentId)
+      } else if (labelAgentId && p.onAgentNameClick) {
+        // Tap on the name label (below the node) → rename that agent in place.
+        p.onAgentNameClick(labelAgentId, e.clientX, e.clientY)
       } else {
         const bubbleAgentId = findBubbleAgentAt(pos.x, pos.y)
         if (bubbleAgentId) {
@@ -174,7 +185,7 @@ export function useCanvasInteraction({
     }
     setIsDragging(false)
     dragTargetRef.current = null
-  }, [screenToCanvas, findAgentAt, findBubbleAgentAt, findToolCallAt, findDiscoveryAt, drawPropsRef, panVelocityRef])
+  }, [screenToCanvas, findAgentAt, findAgentLabelAt, findBubbleAgentAt, findToolCallAt, findDiscoveryAt, drawPropsRef, panVelocityRef])
 
   // Wheel handler attached as native event (passive: false) to allow preventDefault
   const handleWheelRef = useRef<(e: WheelEvent) => void>(() => {})

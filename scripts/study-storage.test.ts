@@ -141,6 +141,50 @@ test('finalizeSession marks completed with an endedAt', () => {
   assert.ok(typeof meta.endedAt === 'string', 'endedAt set')
 })
 
+test('study session lifecycle: markers, discrete folder, event tee, and end boundary', () => {
+  const { workspace, storage } = scaffold()
+  const root = path.join(workspace, 'study-storage')
+  const id = 'ss-abc123'
+  const iso = () => new Date().toISOString()
+
+  storage.recordStudySessionLifecycle({ action: 'started', studySessionId: id, sessionNumber: 1, at: iso(), elapsedMs: 0, protocolMinimumMs: 900000 })
+
+  // One discrete per-session folder, marked active with the protocol minimum.
+  const ssDir = path.join(root, 'study-sessions')
+  const folders = fs.readdirSync(ssDir)
+  assert.equal(folders.length, 1, 'one study-session folder')
+  const dir = path.join(ssDir, folders[0])
+  let meta = JSON.parse(fs.readFileSync(path.join(dir, 'session.json'), 'utf-8'))
+  assert.equal(meta.status, 'active')
+  assert.equal(meta.sessionNumber, 1)
+  assert.equal(meta.protocolMinimumMs, 900000)
+
+  // Events while active are teed into the discrete slice.
+  storage.appendEvent({ time: 1, type: 'message', payload: { role: 'user', content: 'hi' }, sessionId: 'agent-1' })
+  storage.appendEvent({ time: 2, type: 'tool_call_start', payload: { tool: 'Read' }, sessionId: 'agent-1' })
+  let events = fs.readFileSync(path.join(dir, 'events.jsonl'), 'utf-8').trim().split('\n')
+  assert.equal(events.length, 2, 'two events teed into the active session')
+
+  // End boundary: distinctive marker + folder finalized with rollups.
+  storage.recordStudySessionLifecycle({ action: 'ended', studySessionId: id, sessionNumber: 1, at: iso(), elapsedMs: 123456, reason: 'user-ended' })
+  meta = JSON.parse(fs.readFileSync(path.join(dir, 'session.json'), 'utf-8'))
+  assert.equal(meta.status, 'ended')
+  assert.ok(typeof meta.endedAt === 'string', 'endedAt set on end')
+  assert.equal(meta.endReason, 'user-ended')
+  assert.ok(meta.agentSessionIds.includes('agent-1'), 'tab id captured')
+
+  // Beyond the session's end, further events are no longer teed here (they stay
+  // recoverable in the per-transcript folders + the top-level marker log).
+  storage.appendEvent({ time: 3, type: 'message', payload: {}, sessionId: 'agent-1' })
+  events = fs.readFileSync(path.join(dir, 'events.jsonl'), 'utf-8').trim().split('\n')
+  assert.equal(events.length, 2, 'post-end events not teed into the ended session')
+
+  // The always-present marker log records every action, stamped on arrival.
+  const markers = fs.readFileSync(path.join(root, 'study-sessions.jsonl'), 'utf-8').trim().split('\n').map(l => JSON.parse(l))
+  assert.deepEqual(markers.map(m => m.action), ['started', 'ended'])
+  assert.ok(markers.every(m => typeof m.capturedAt === 'string'))
+})
+
 test('resuming a finalized session flips status back to active and clears endedAt', () => {
   const { workspace, sessionId, mainFile, storage } = scaffold()
   const metaPath = path.join(sessionDir(workspace, sessionId), 'session.json')

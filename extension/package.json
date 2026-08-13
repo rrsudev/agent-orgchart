@@ -1,9 +1,9 @@
 {
-  "name": "agent-flow",
-  "displayName": "Agent Flow",
-  "description": "Real-time visualization of Claude Code and Codex agent orchestration",
-  "version": "0.9.1",
-  "publisher": "simon-p",
+  "name": "agent-flow-study",
+  "displayName": "Agent Flow — Study Build",
+  "description": "Real-time visualization of Claude Code and Codex agent orchestration (research study build)",
+  "version": "1.0.0",
+  "publisher": "agentflow-study",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -16,46 +16,46 @@
   "categories": ["Visualization", "Other"],
   "keywords": ["llm", "agent", "claude", "codex", "ai", "visualization", "orchestration"],
   "activationEvents": [
-    "onWebviewPanel:agentVisualizer",
+    "onWebviewPanel:agentFlowStudy",
     "onStartupFinished"
   ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "agentVisualizer.open",
+        "command": "agentFlowStudy.open",
         "title": "Open Agent Flow",
         "category": "Agent Flow"
       },
       {
-        "command": "agentVisualizer.openToSide",
+        "command": "agentFlowStudy.openToSide",
         "title": "Open Agent Flow to Side",
         "category": "Agent Flow"
       },
       {
-        "command": "agentVisualizer.connectToAgent",
+        "command": "agentFlowStudy.connectToAgent",
         "title": "Connect to Running Agent",
         "category": "Agent Flow"
       },
       {
-        "command": "agentVisualizer.configureHooks",
+        "command": "agentFlowStudy.configureHooks",
         "title": "Configure Claude Code Hooks",
         "category": "Agent Flow"
       },
       {
-        "command": "agentVisualizer.revealStudyFolder",
+        "command": "agentFlowStudy.revealStudyFolder",
         "title": "Reveal Study Data Folder",
         "category": "Agent Flow"
       },
       {
-        "command": "agentVisualizer.packageStudyData",
+        "command": "agentFlowStudy.packageStudyData",
         "title": "Package Study Data (Zip)",
         "category": "Agent Flow"
       }
     ],
     "keybindings": [
       {
-        "command": "agentVisualizer.open",
+        "command": "agentFlowStudy.open",
         "key": "ctrl+alt+a",
         "mac": "cmd+alt+a"
       }
@@ -63,7 +63,7 @@
     "configuration": {
       "title": "Agent Flow",
       "properties": {
-        "agentVisualizer.runtime": {
+        "agentFlowStudy.runtime": {
           "type": "string",
           "enum": ["auto", "claude", "codex"],
           "enumDescriptions": [
@@ -74,35 +74,40 @@
           "default": "auto",
           "description": "Which agent runtime(s) to watch. In auto mode, runtimes you don't use are harmless no-ops (no session directory = nothing to scan)."
         },
-        "agentVisualizer.devServerPort": {
+        "agentFlowStudy.devServerPort": {
           "type": "number",
           "default": 0,
           "description": "Port for the development server. Set to 0 (default) for production mode, or 3002 for development."
         },
-        "agentVisualizer.eventLogPath": {
+        "agentFlowStudy.eventLogPath": {
           "type": "string",
           "default": "",
           "description": "Path to JSONL event log file to watch for agent events"
         },
-        "agentVisualizer.autoOpen": {
+        "agentFlowStudy.autoOpen": {
           "type": "boolean",
           "default": false,
           "description": "Automatically open the visualizer when an agent session starts"
         },
-        "agentVisualizer.studyStorage.enabled": {
+        "agentFlowStudy.studyStorage.enabled": {
           "type": "boolean",
-          "default": false,
-          "description": "Research build: capture full local copies of Claude Code sessions into a 'study-storage/' folder for sharing with researchers. Requires one-time in-editor consent. Off by default."
+          "default": true,
+          "description": "Study build: capture full local copies of Claude Code sessions for sharing with researchers. Informed consent is collected at study enrollment, so no in-editor prompt is shown. On by default so no session is lost; each workspace is captured to its own subfolder under a central '~/.agent-flow-study' home (kept out of your repos, survives uninstall). Set to false to pause capture."
         },
-        "agentVisualizer.studyStorage.path": {
+        "agentFlowStudy.studyStorage.path": {
           "type": "string",
           "default": "",
-          "description": "Folder for study capture. Empty = '<workspace>/study-storage'. Relative paths resolve against the workspace root."
+          "description": "Override the capture folder. Empty (default) = a per-workspace subfolder under '~/.agent-flow-study'. A non-empty path (relative to the workspace) is used as the exact capture folder for this workspace instead."
         },
-        "agentVisualizer.studyStorage.participantId": {
+        "agentFlowStudy.studyStorage.participantId": {
           "type": "string",
           "default": "",
           "description": "Study-assigned participant id recorded in the capture manifest (not personally identifying)."
+        },
+        "agentFlowStudy.studyWebsiteUrl": {
+          "type": "string",
+          "default": "",
+          "description": "URL opened by the 15-minute study-protocol popup ('record your steps on the study website'). Empty falls back to the placeholder baked into the app."
         }
       }
     }

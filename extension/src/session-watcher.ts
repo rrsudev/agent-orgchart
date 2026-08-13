@@ -99,6 +99,7 @@ export class SessionWatcher implements AgentSessionWatcher {
     return Array.from(this.sessions.values()).map(s => ({
       id: s.sessionId,
       label: s.label,
+      goal: s.goal,
       status: s.sessionCompleted ? 'completed' : 'active',
       startTime: s.sessionStartTime,
       lastActivityTime: s.lastActivityTime,
@@ -397,6 +398,7 @@ export class SessionWatcher implements AgentSessionWatcher {
       fileWatcher: null,
       pollTimer: null,
       fileSize: 0,
+      fileTail: '',
       sessionStartTime: Date.now(),
       pendingToolCalls: new Map(),
       seenToolUseIds: new Set(),
@@ -469,9 +471,15 @@ export class SessionWatcher implements AgentSessionWatcher {
     // for long-lived watchers. This ensures we still detect new content.
     session.pollTimer = setInterval(() => {
       this.readNewLines(sessionId)
+      // Once complete (idle), skip the subagent scans, sidecar sync, and watcher
+      // re-creation below. readNewLines above still detects a resume via statSync
+      // (it flips sessionCompleted back off), which re-arms this work — and this
+      // gate is what stops a completed session's watchers from being re-created
+      // right after we released them on completion (see the inactivity handler).
+      if (session.sessionCompleted) return
       // Also poll subagent files — fs.watch may not fire after extension restart
       for (const [subPath] of session.subagentWatchers) {
-        readSubagentNewLines(this.selfDelegate, this.parser,subPath, sessionId)
+        readSubagentNewLines(this.selfDelegate, this.parser, subPath, sessionId)
       }
       scanSubagentsDir(this.selfDelegate, this.parser, sessionId)
       // Catch subagent / tool-result files that changed without the main file.
@@ -490,9 +498,10 @@ export class SessionWatcher implements AgentSessionWatcher {
     const session = this.sessions.get(sessionId)
     if (!session) { return }
 
-    const result = readNewFileLines(session.filePath, session.fileSize)
+    const result = readNewFileLines(session.filePath, session.fileSize, session.fileTail)
     if (!result) return
     session.fileSize = result.newSize
+    session.fileTail = result.tail
     for (const line of result.lines) {
       this.parser.processTranscriptLine(line, ORCHESTRATOR_NAME, session.pendingToolCalls, session.seenToolUseIds, sessionId, session.seenMessageHashes)
     }
@@ -549,8 +558,28 @@ export class SessionWatcher implements AgentSessionWatcher {
           type: 'agent_complete',
           payload: { name: ORCHESTRATOR_NAME },
         }, sessionId)
+        // Final mirror so the capture reflects the last bytes, then finalize.
+        this.studyStorage?.syncClaudeSession(sessionId)
         this.studyStorage?.finalizeSession(sessionId)
         this._onSessionLifecycle.fire({ type: 'ended', sessionId, label: session.label })
+        // Release OS watch handles (fs.watch) so they don't accumulate across a
+        // long study — hundreds of open handles risk EMFILE ("too many open
+        // files"), which then hard-fails every further read. We KEEP the session
+        // record and its 3 s poll (a timer, not an fd): the poll still detects a
+        // resume via statSync, and the preserved fileSize/fileTail mean a resume
+        // processes only new content (no duplicate re-emit). The subagent-dir
+        // watcher + per-subagent watchers are re-established by the poll's
+        // scanSubagentsDir once the session goes active again.
+        session.fileWatcher?.close()
+        session.fileWatcher = null
+        session.subagentsDirWatcher?.close()
+        session.subagentsDirWatcher = null
+        for (const [, sub] of session.subagentWatchers) {
+          sub.watcher?.close()
+          sub.watcher = null
+          if (sub.permissionTimer) { clearTimeout(sub.permissionTimer); sub.permissionTimer = null }
+        }
+        if (session.permissionTimer) { clearTimeout(session.permissionTimer); session.permissionTimer = null }
       }
     }, INACTIVITY_TIMEOUT_MS)
   }

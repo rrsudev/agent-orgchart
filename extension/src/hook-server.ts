@@ -74,21 +74,28 @@ export class HookServer implements vscode.Disposable {
     return new Promise((resolve, reject) => {
       this.server = http.createServer((req, res) => {
         if (req.method === 'POST') {
-          let body = ''
+          // Accumulate raw bytes and decode ONCE at the end. Decoding per-chunk
+          // with chunk.toString() corrupts any multi-byte UTF-8 sequence
+          // (emoji/CJK/accented text) that straddles a chunk boundary. Size is
+          // tracked in bytes, not UTF-16 code units.
+          const chunks: Buffer[] = []
+          let size = 0
           let oversized = false
           req.on('data', (chunk: Buffer) => {
             if (oversized) return
-            body += chunk.toString()
-            if (body.length > HOOK_MAX_BODY_SIZE) {
+            size += chunk.length
+            if (size > HOOK_MAX_BODY_SIZE) {
               oversized = true
-              body = ''
-              log.warn('Request body exceeded size limit, discarding')
+              chunks.length = 0
+              log.warn(`Request body exceeded ${HOOK_MAX_BODY_SIZE} bytes, discarding`)
+              return
             }
+            chunks.push(chunk)
           })
           req.on('end', () => {
-            if (!oversized) {
+            if (!oversized && chunks.length > 0) {
               try {
-                const parsed: unknown = JSON.parse(body)
+                const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'))
                 if (!parsed || typeof parsed !== 'object' || !('session_id' in parsed) || !('hook_event_name' in parsed)
                     || typeof (parsed as HookPayload).session_id !== 'string'
                     || typeof (parsed as HookPayload).hook_event_name !== 'string') {

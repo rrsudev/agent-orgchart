@@ -29,13 +29,17 @@ import * as path from 'path'
 import * as os from 'os'
 import * as crypto from 'crypto'
 
-import type { AgentEvent } from './protocol'
+import type { AgentEvent, StudySessionLifecycle } from './protocol'
 
 export type StudyRuntime = 'claude' | 'codex'
 
 export interface StudyStorageOptions {
-  /** Root of the capture folder, e.g. <workspace>/study-storage */
+  /** Root of the capture folder, e.g. <base>/<workspace-key> */
   storageRoot: string
+  /** Folder to archive when the participant packages their data. Defaults to
+   *  storageRoot; for the central per-workspace layout this is the shared base
+   *  so a single archive contains every workspace's capture. */
+  packagingRoot?: string
   /** The project/workspace this capture belongs to */
   workspaceRoot: string
   /** Study-assigned participant id (not PII). Defaults to 'anonymous'. */
@@ -44,12 +48,37 @@ export interface StudyStorageOptions {
   toolVersion?: string
   /** Emit warnings to the console on capture errors. */
   verbose?: boolean
+  /** Called (best-effort, may fire repeatedly) when a capture write/init fails,
+   *  so the host can surface a visible signal. `summary` is the failing context. */
+  onError?: (summary: string) => void
 }
 
 /** The current on-disk schema version for study-storage. */
 const SCHEMA_VERSION = 1
 
-interface SyncedFile { hash: string }
+interface SyncedFile { hash: string; size: number; mtimeMs: number }
+
+/**
+ * A study session — a participant "work period" driven from the UI (start /
+ * pause / resume / end), orthogonal to the per-transcript sessions above.
+ * Captured discretely under study-sessions/<NNN>-<id>/ so researchers get a
+ * per-session slice of the same event stream, in addition to (never instead
+ * of) the always-on per-transcript folders.
+ */
+interface StudySessionRec {
+  id: string
+  number: number
+  dir: string
+  startedAt: string
+  status: 'active' | 'paused' | 'ended'
+  /** Accumulated *running* time (ms), excludes paused spans — mirrors the UI clock. */
+  accumulatedMs: number
+  protocolMinimumMs?: number
+  protocolReachedAt?: string
+  /** Union of transcript session ids seen while this study session was active. */
+  agentSessionIds: Set<string>
+  eventCount: number
+}
 
 interface SessionRec {
   runtime: StudyRuntime
@@ -67,36 +96,69 @@ interface SessionRec {
 
 export class StudyStorage {
   private readonly root: string
+  private readonly packagingRoot: string
   private readonly workspaceRoot: string
   private readonly participantId: string
   private readonly toolVersion: string
   private readonly verbose: boolean
+  private readonly onError?: (summary: string) => void
 
   private readonly liveSessionsDir: string
   private readonly backfillSessionsDir: string
   private readonly manifestPath: string
+  /** Top-level, append-only marker log of EVERY study-session action. */
+  private readonly studySessionsLogPath: string
+  /** Root of the per-study-session discrete folders. */
+  private readonly studySessionsDir: string
 
   private readonly sessions = new Map<string, SessionRec>()
+  /** The study session currently receiving teed events (null between sessions). */
+  private currentStudySession: StudySessionRec | null = null
   private initialized = false
 
   constructor(opts: StudyStorageOptions) {
     this.root = opts.storageRoot
+    this.packagingRoot = opts.packagingRoot || opts.storageRoot
     this.workspaceRoot = opts.workspaceRoot
     this.participantId = opts.participantId || 'anonymous'
     this.toolVersion = opts.toolVersion || '0.0.0'
     this.verbose = opts.verbose ?? false
+    this.onError = opts.onError
     this.liveSessionsDir = path.join(this.root, 'live', 'sessions')
     this.backfillSessionsDir = path.join(this.root, 'backfill', 'sessions')
     this.manifestPath = path.join(this.root, 'MANIFEST.json')
+    this.studySessionsLogPath = path.join(this.root, 'study-sessions.jsonl')
+    this.studySessionsDir = path.join(this.root, 'study-sessions')
   }
 
   private warn(...args: unknown[]) {
     if (this.verbose) console.warn('[study-storage]', ...args)
   }
 
+  /** Record a capture FAILURE durably + visibly. Unlike warn(), this is never
+   *  silenced: it appends to <root>/capture-errors.log, logs to the console, and
+   *  notifies the host (onError) so a totally-failed capture can't masquerade as
+   *  a healthy one. Best-effort — never throws into the caller. */
+  private logFailure(context: string, err: unknown): void {
+    const detail = err instanceof Error ? (err.stack ?? err.message) : String(err)
+    const line = `${new Date().toISOString()} [${context}] ${detail}\n`
+    // Durable log inside the capture root, so the failure is discoverable in the
+    // delivered data even if no one watched the console. (If the root itself is
+    // unwritable this also fails — onError is the signal for that case.)
+    try { fs.appendFileSync(path.join(this.root, 'capture-errors.log'), line) } catch { /* fall through to console + onError */ }
+    console.error('[study-storage]', context, 'failed:', err)
+    try { this.onError?.(context) } catch { /* reporting must never throw */ }
+  }
+
   /** Absolute path to the capture root (for the indexer). */
   getStorageRoot(): string {
     return this.root
+  }
+
+  /** Absolute path of the folder to archive when packaging — may contain
+   *  several per-workspace capture roots under a shared base. */
+  getPackagingRoot(): string {
+    return this.packagingRoot
   }
 
   /** Create the folder skeleton, README, MANIFEST, and .gitignore entry. Idempotent. */
@@ -110,7 +172,7 @@ export class StudyStorage {
       this.initialized = true
       this.warn(`initialized at ${this.root}`)
     } catch (e) {
-      this.warn('init failed:', e)
+      this.logFailure('init', e)
     }
   }
 
@@ -135,7 +197,7 @@ export class StudyStorage {
       this.warn(`session ${sessionId.slice(0, 8)} (${runtime}) → ${dir}`)
       return rec
     } catch (e) {
-      this.warn('ensureSession failed:', e)
+      this.logFailure('ensureSession', e)
       return null
     }
   }
@@ -211,7 +273,7 @@ export class StudyStorage {
       this.warn(`backfilled ${sessionId.slice(0, 8)} → ${dir}`)
       return true
     } catch (e) {
-      this.warn('backfillClaudeSession failed:', e)
+      this.logFailure('backfillClaudeSession', e)
       return false
     }
   }
@@ -250,7 +312,7 @@ export class StudyStorage {
         this.mirrorTree(rec, rec.sourceSidecarDir, rec.dir)
       }
     } catch (e) {
-      this.warn('syncClaudeSession failed:', e)
+      this.logFailure('syncClaudeSession', e)
     }
   }
 
@@ -262,14 +324,34 @@ export class StudyStorage {
    * buffer once (and writing that exact buffer) also avoids a stat/copy race.
    */
   private mirrorFile(rec: SessionRec, src: string, dest: string): void {
+    // Cheap stat gate first: skip the full read+hash when neither size nor mtime
+    // changed since the last sync. Any real writer (append OR in-place rewrite)
+    // bumps mtime, so this keeps the "never miss a same-length rewrite" fidelity
+    // guarantee while avoiding an O(file-size) re-hash on every 3 s poll — which,
+    // unbounded across a multi-hour session, was quadratic disk + CPU.
+    let stat: fs.Stats
+    try { stat = fs.statSync(src) } catch { return }
+    const prev = rec.synced.get(src)
+    if (prev && prev.size === stat.size && prev.mtimeMs === stat.mtimeMs) return
+
     let buf: Buffer
     try { buf = fs.readFileSync(src) } catch { return }
     const hash = crypto.createHash('sha1').update(buf).digest('hex')
-    const prev = rec.synced.get(src)
-    if (prev && prev.hash === hash) return
+    if (prev && prev.hash === hash) {
+      // Content identical despite a stat change — refresh the stat so the next
+      // tick short-circuits, but skip the rewrite.
+      rec.synced.set(src, { hash, size: stat.size, mtimeMs: stat.mtimeMs })
+      return
+    }
     fs.mkdirSync(path.dirname(dest), { recursive: true })
-    fs.writeFileSync(dest, buf)
-    rec.synced.set(src, { hash })
+    // Atomic write: a concurrent reader (e.g. the packaging zip, which runs while
+    // capture timers are still live) must never observe a half-written or
+    // truncated mirror. Write to a temp file, then rename — rename is atomic
+    // within the same directory/filesystem.
+    const tmp = dest + '.tmp'
+    fs.writeFileSync(tmp, buf)
+    fs.renameSync(tmp, dest)
+    rec.synced.set(src, { hash, size: stat.size, mtimeMs: stat.mtimeMs })
   }
 
   /** Recursively mirror a directory tree (subagents/, tool-results/, …). */
@@ -297,11 +379,24 @@ export class StudyStorage {
    * folder lazily for a source whose runtime is known (e.g. hook events).
    */
   appendEvent(event: AgentEvent, ensureRuntime?: StudyRuntime): void {
+    // Tee into the active study-session slice FIRST, independent of whether the
+    // per-transcript folder exists — the event belongs to the session window
+    // even if its transcript isn't (yet) registered.
+    this.teeStudySessionEvent(event)
     const sessionId = event.sessionId
     if (!sessionId) return
     let rec = this.sessions.get(sessionId)
     if (!rec && ensureRuntime) rec = this.ensureSession(sessionId, ensureRuntime) || undefined
     if (!rec) return
+    this.appendJsonl(path.join(rec.dir, 'events.jsonl'), event)
+  }
+
+  /** Mirror an event into the current study session's discrete events.jsonl. */
+  private teeStudySessionEvent(event: AgentEvent): void {
+    const rec = this.currentStudySession
+    if (!rec) return
+    if (event.sessionId) rec.agentSessionIds.add(event.sessionId)
+    rec.eventCount++
     this.appendJsonl(path.join(rec.dir, 'events.jsonl'), event)
   }
 
@@ -320,7 +415,115 @@ export class StudyStorage {
     try {
       fs.appendFileSync(file, JSON.stringify(obj) + '\n')
     } catch (e) {
-      this.warn('append failed:', file, e)
+      this.logFailure('append:' + file, e)
+    }
+  }
+
+  // ─── Study sessions (participant work periods) ───────────────────────────
+
+  /**
+   * Record one study-session lifecycle action from the UI. Writes two ways:
+   *   1. study-sessions.jsonl (top-level) — an always-present, chronological
+   *      marker log of EVERY action, so a session boundary is never ambiguous.
+   *   2. study-sessions/<NNN>-<id>/ — a discrete per-session folder whose
+   *      events.jsonl receives the teed event stream for that window.
+   * Never throws into the caller.
+   */
+  recordStudySessionLifecycle(p: StudySessionLifecycle): void {
+    if (!this.initialized) this.init()
+    try {
+      const capturedAt = new Date().toISOString()
+      const line = { capturedAt, ...p }
+      this.appendJsonl(this.studySessionsLogPath, line)
+
+      if (p.action === 'started') {
+        this.beginStudySession(p, capturedAt)
+        return
+      }
+
+      // A 'resumed' after the host lost its in-memory record (reload/crash) must
+      // still land data — re-open the folder rather than dropping the session.
+      if (p.action === 'resumed' &&
+          (!this.currentStudySession || this.currentStudySession.id !== p.studySessionId)) {
+        this.beginStudySession(p, capturedAt, true)
+      }
+
+      const rec = this.currentStudySession
+      if (!rec || rec.id !== p.studySessionId) return
+
+      if (p.agentSessionIds) for (const s of p.agentSessionIds) rec.agentSessionIds.add(s)
+      if (p.protocolMinimumMs) rec.protocolMinimumMs = p.protocolMinimumMs
+      rec.accumulatedMs = p.elapsedMs
+      if (p.action === 'protocol-reached') rec.protocolReachedAt = capturedAt
+      if (p.action === 'paused') rec.status = 'paused'
+      if (p.action === 'resumed') rec.status = 'active'
+
+      this.appendJsonl(path.join(rec.dir, 'lifecycle.jsonl'), line)
+
+      if (p.action === 'ended') {
+        rec.status = 'ended'
+        this.writeStudySessionMeta(rec, 'ended', p.reason)
+        this.currentStudySession = null
+      } else {
+        this.writeStudySessionMeta(rec, rec.status, p.reason)
+      }
+    } catch (e) {
+      this.logFailure('recordStudySessionLifecycle', e)
+    }
+  }
+
+  private beginStudySession(p: StudySessionLifecycle, capturedAt: string, resumed = false): void {
+    // Finalize any dangling active session (a 'started' without a prior 'ended').
+    if (this.currentStudySession && this.currentStudySession.id !== p.studySessionId) {
+      this.writeStudySessionMeta(this.currentStudySession, 'ended', 'superseded')
+    }
+    fs.mkdirSync(this.studySessionsDir, { recursive: true })
+    const safeId = p.studySessionId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 12) || 'session'
+    const dir = path.join(this.studySessionsDir, `${String(p.sessionNumber).padStart(3, '0')}-${safeId}`)
+    fs.mkdirSync(dir, { recursive: true })
+    const rec: StudySessionRec = {
+      id: p.studySessionId,
+      number: p.sessionNumber,
+      dir,
+      startedAt: p.at || capturedAt,
+      status: 'active',
+      accumulatedMs: p.elapsedMs,
+      protocolMinimumMs: p.protocolMinimumMs,
+      agentSessionIds: new Set(p.agentSessionIds ?? []),
+      eventCount: 0,
+    }
+    this.currentStudySession = rec
+    this.writeStudySessionMeta(rec, 'active')
+    this.appendJsonl(path.join(dir, 'lifecycle.jsonl'), { capturedAt, ...p })
+    this.warn(`study session #${p.sessionNumber} ${resumed ? 'resumed' : 'started'} → ${dir}`)
+  }
+
+  private writeStudySessionMeta(
+    rec: StudySessionRec,
+    status: 'active' | 'paused' | 'ended',
+    endReason?: string,
+  ): void {
+    const meta = {
+      studySessionId: rec.id,
+      sessionNumber: rec.number,
+      participantId: this.participantId,
+      projectPath: this.workspaceRoot,
+      startedAt: rec.startedAt,
+      endedAt: status === 'ended' ? new Date().toISOString() : null,
+      status,
+      endReason: endReason ?? null,
+      accumulatedRunningMs: rec.accumulatedMs,
+      protocolMinimumMs: rec.protocolMinimumMs ?? null,
+      protocolReachedAt: rec.protocolReachedAt ?? null,
+      protocolSatisfied: rec.protocolMinimumMs != null && rec.accumulatedMs >= rec.protocolMinimumMs,
+      agentSessionIds: [...rec.agentSessionIds],
+      eventCount: rec.eventCount,
+      schemaVersion: SCHEMA_VERSION,
+    }
+    try {
+      fs.writeFileSync(path.join(rec.dir, 'session.json'), JSON.stringify(meta, null, 2) + '\n')
+    } catch (e) {
+      this.warn('writeStudySessionMeta failed:', e)
     }
   }
 
@@ -343,6 +546,13 @@ export class StudyStorage {
         this.writeSessionMeta(sessionId, rec, 'completed')
         rec.finalized = true
       } catch { /* ignore on shutdown */ }
+    }
+    // Don't strand an in-progress study session as "active" on shutdown. Its
+    // events are already flushed (append-only); mark the slice ended so the
+    // folder reads correctly, but leave the marker log untouched (no synthetic
+    // 'ended' action — the participant may resume in a later run).
+    if (this.currentStudySession) {
+      try { this.writeStudySessionMeta(this.currentStudySession, 'ended', 'host-shutdown') } catch { /* ignore */ }
     }
   }
 
@@ -390,6 +600,7 @@ export class StudyStorage {
       tool: 'agent-flow',
       toolVersion: this.toolVersion,
       participantId: this.participantId,
+      workspacePath: this.workspaceRoot,
       consent: true,
       machineId: crypto.createHash('sha256').update(os.hostname()).digest('hex').slice(0, 16),
       os: os.platform(),
@@ -456,6 +667,21 @@ sessions, produced by the Agent Flow research build. Each session (each visualiz
 - \`environment.json\`  — OS / runtime snapshot
 
 \`MANIFEST.json\` at the top records the participant id, tool version, and capture window.
+
+## Study sessions (participant work periods)
+
+Separate from the per-tab folders above, the tool also records the participant's
+timed **study sessions** (each a "work period" they start, pause, and end):
+
+- \`study-sessions.jsonl\` — a top-level, append-only marker log of every session
+  action (started / paused / resumed / ended / 15-min protocol reached), so each
+  session boundary is unambiguous.
+- \`study-sessions/<NNN>-<id>/\` — one folder per study session, with
+  \`session.json\` (timings, running duration, whether the 15-min minimum was met,
+  which tabs were used), \`events.jsonl\` (the slice of the event stream captured
+  during that session's window), and \`lifecycle.jsonl\` (that session's own
+  markers). The per-tab folders keep recording continuously, so actions *beyond*
+  a session's official end remain recoverable there.
 
 ## How to send your data to the researchers
 

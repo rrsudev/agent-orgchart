@@ -20,7 +20,6 @@ import {
   SYSTEM_CONTENT_PREFIXES,
   generateSubagentFallbackName,
   resolveSubagentChildName,
-  truncateWords,
   formatSubagentDisplayName,
 } from './constants'
 import { summarizeInput, summarizeResult, extractInputData, detectError, buildDiscovery } from './tool-summarizer'
@@ -33,7 +32,7 @@ export interface TranscriptParserDelegate {
   emit(event: AgentEvent, sessionId?: string): void
   elapsed(sessionId?: string): number
   getSession(sessionId: string): WatchedSession | undefined
-  fireSessionLifecycle(event: { type: 'started' | 'ended' | 'updated'; sessionId: string; label: string }): void
+  fireSessionLifecycle(event: { type: 'started' | 'ended' | 'updated'; sessionId: string; label: string; goal?: string }): void
   emitContextUpdate(agentName: string, session: WatchedSession, sessionId?: string): void
 }
 
@@ -570,18 +569,22 @@ export class TranscriptParser {
   }
 
   /** Set the session label from Claude's AI-generated title. This wins over the
-   *  first-user-message fallback, and renames both the tab and the main node. */
+   *  first-user-message fallback, and renames both the tab and the main node.
+   *  The AI title is Claude's own concise goal summary — we keep it in full as
+   *  `goal` (only the compact `label` is word-clamped). */
   setSessionLabelFromAiTitle(aiTitle: string, sessionId: string): void {
     const title = aiTitle.trim()
     if (!title) return
     const session = this.delegate.getSession(sessionId)
     if (!session) return
-    const label = truncateWords(title, SESSION_LABEL_WORD_MAX)
-    if (session.label === label && session.labelFromAiTitle) return
+    const label = cleanGoal(title)
+    const goal = cleanGoal(title)
+    if (session.label === label && session.goal === goal && session.labelFromAiTitle) return
     session.label = label
+    session.goal = goal
     session.labelSet = true
     session.labelFromAiTitle = true
-    this.delegate.fireSessionLifecycle({ type: 'updated', sessionId, label })
+    this.delegate.fireSessionLifecycle({ type: 'updated', sessionId, label, goal })
   }
 
   /** Extract a human-readable label from the first user message in transcript entries */
@@ -591,7 +594,8 @@ export class TranscriptParser {
       if (entry.type !== 'user') continue
       const text = this.extractUserMessageText(entry)
       if (text) {
-        session.label = this.truncateLabel(text)
+        session.label = cleanGoal(text)
+        session.goal = cleanGoal(text)
         session.labelSet = true
         return
       }
@@ -623,12 +627,6 @@ export class TranscriptParser {
     return SYSTEM_CONTENT_PREFIXES.some(prefix => text.startsWith(prefix))
   }
 
-  /** Truncate to first line on a word boundary with a single ellipsis. */
-  truncateLabel(text: string): string {
-    const firstLine = text.split('\n')[0]
-    return truncateWords(firstLine, SESSION_LABEL_WORD_MAX)
-  }
-
   /** Update session label on first user message and notify the webview.
    *  Skips if an AI title already claimed the label. */
   maybeSetSessionLabel(entry: TranscriptEntry, sessionId: string): void {
@@ -637,12 +635,22 @@ export class TranscriptParser {
     if (entry.type !== 'user') return
     const text = this.extractUserMessageText(entry)
     if (!text) return
-    session.label = this.truncateLabel(text)
+    session.label = cleanGoal(text)
+    session.goal = cleanGoal(text)
     session.labelSet = true
-    this.delegate.fireSessionLifecycle({ type: 'updated', sessionId, label: session.label })
+    this.delegate.fireSessionLifecycle({ type: 'updated', sessionId, label: session.label, goal: session.goal })
   }
 }
 
-/** Max words for session/main-agent labels — kept short so tabs and nodes don't
- *  overfill. */
-const SESSION_LABEL_WORD_MAX = 3
+
+/** Max chars for the fuller `goal` text sent to the UI (node subtitle preview +
+ *  full-goal hover). Bounds the payload while comfortably fitting a sentence or
+ *  two — long enough to read the intent, short enough for a tooltip. */
+const GOAL_MAX = 300
+
+/** Normalize a raw title / user message into a single-line goal string: collapse
+ *  whitespace/newlines and cap length (with an ellipsis when truncated). */
+function cleanGoal(text: string): string {
+  const flat = text.replace(/\s+/g, ' ').trim()
+  return flat.length > GOAL_MAX ? flat.slice(0, GOAL_MAX - 1).trimEnd() + '…' : flat
+}

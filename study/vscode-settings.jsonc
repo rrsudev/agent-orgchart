@@ -1,0 +1,23 @@
+// Agent Flow — Study Build: OPTIONAL participant settings.
+//
+// Capture is ON by default in this build — you do NOT need this file for
+// recording to work. Consent is handled at study enrollment; installing the
+// build is the participant accepting recording. Each workspace is captured to
+// its own subfolder under  ~/.agent-flow-study/<workspace>-<hash>/  (outside
+// every repo, and it survives uninstalling the extension).
+//
+// Use this only to TAG the data with a participant id. Put it in User settings
+// (Cmd/Ctrl+Shift+P → "Preferences: Open User Settings (JSON)") so it applies
+// to every workspace the participant records in.
+{
+  // Optional. Written into each workspace's MANIFEST.json. Capture works fine
+  // without it (recorded as "anonymous"); it only tags sessions captured after
+  // it's set, so it can be filled in later for bookkeeping.
+  "agentFlowStudy.studyStorage.participantId": "",
+
+  // Optional. URL the 15-minute study-protocol popup opens. Leave "" for the
+  // placeholder baked into the app.
+  "agentFlowStudy.studyWebsiteUrl": ""
+
+  // To PAUSE capture (rarely needed): "agentFlowStudy.studyStorage.enabled": false
+}

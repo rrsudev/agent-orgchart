@@ -36,6 +36,11 @@ interface CanvasProps {
   selectedAgentId: string | null
   hoveredAgentId: string | null
   showStats: boolean
+  /** Show the numeric token count / % readouts on nodes (toggleable). */
+  showTokens?: boolean
+  /** Show the inline goal sublabel under nodes. Off by default — the hover
+   *  tooltip is the usual way to read a node's goal. */
+  showSubtitles?: boolean
   showHexGrid: boolean
   zoomToFitTrigger?: number
   pauseAutoFit?: boolean
@@ -49,17 +54,21 @@ interface CanvasProps {
   selectedDiscoveryId?: string | null
   /** User-assigned identity colors, keyed by agent id (soft card-fill wash). */
   agentColors?: Map<string, string>
-  /** Effective display names, keyed by agent id (custom name / session label). */
+  /** Effective display names, keyed by agent id (call-sign / custom name). */
   agentNames?: Map<string, string>
+  /** Goal subtitles for main-agent nodes — dim second line under the name. */
+  agentSubtitles?: Map<string, string>
   /** Double-click on an agent node — opens inline rename at the given screen point. */
   onAgentDoubleClick?: (agentId: string, clientX: number, clientY: number) => void
+  /** Tap on an agent's name label (below the node) — opens inline rename. */
+  onAgentNameClick?: (agentId: string, clientX: number, clientY: number) => void
 }
 
 export function AgentCanvas({
   simulationRef,
-  selectedAgentId, hoveredAgentId, showStats, showHexGrid, zoomToFitTrigger, pauseAutoFit,
+  selectedAgentId, hoveredAgentId, showStats, showTokens, showSubtitles, showHexGrid, zoomToFitTrigger, pauseAutoFit,
   onAgentClick, onAgentHover, onAgentDrag, onContextMenu, onToolCallClick, selectedToolCallId, onDiscoveryClick, selectedDiscoveryId,
-  agentColors, agentNames, onAgentDoubleClick,
+  agentColors, agentNames, agentSubtitles, onAgentDoubleClick, onAgentNameClick,
 }: CanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mainCanvasRef = useRef<HTMLCanvasElement>(null)
@@ -105,12 +114,12 @@ export function AgentCanvas({
   const makeDrawProps = (prev?: { isDragging: boolean }) => ({
     agents: sim.agents, toolCalls: sim.toolCalls,
     particles: sim.particles, edges: sim.edges, discoveries: sim.discoveries,
-    selectedAgentId, hoveredAgentId, showStats, showHexGrid,
+    selectedAgentId, hoveredAgentId, showStats, showTokens, showSubtitles, showHexGrid,
     selectedToolCallId, selectedDiscoveryId,
     simTime: sim.currentTime, pauseAutoFit, dimensions,
     onAgentDrag, onAgentClick, onAgentHover, onContextMenu,
-    onToolCallClick, onDiscoveryClick, onAgentDoubleClick,
-    agentColors, agentNames,
+    onToolCallClick, onDiscoveryClick, onAgentDoubleClick, onAgentNameClick,
+    agentColors, agentNames, agentSubtitles,
     isDragging: prev?.isDragging ?? false,
   })
   const drawPropsRef = useRef(makeDrawProps())
@@ -206,10 +215,10 @@ export function AgentCanvas({
 
       const {
         agents, toolCalls, particles, edges, discoveries,
-        selectedAgentId, hoveredAgentId, showStats, showHexGrid,
+        selectedAgentId, hoveredAgentId, showStats, showTokens, showSubtitles, showHexGrid,
         selectedToolCallId, selectedDiscoveryId,
         simTime, pauseAutoFit, dimensions, onAgentDrag,
-        agentColors, agentNames,
+        agentColors, agentNames, agentSubtitles,
         isDragging,
       } = drawPropsRef.current
       const transform = transformRef.current
@@ -286,7 +295,7 @@ export function AgentCanvas({
       drawEdges(ctx, edges, agents, toolCalls, activeEdgeIds, timeRef.current)
       drawToolCalls(ctx, toolCalls, timeRef.current, selectedToolCallId)
       drawDiscoveries(ctx, discoveries, agents, selectedDiscoveryId)
-      drawAgents(ctx, agents, selectedAgentId, hoveredAgentId, showStats, timeRef.current, agentColors, agentNames)
+      drawAgents(ctx, agents, selectedAgentId, hoveredAgentId, showStats, timeRef.current, agentColors, agentNames, agentSubtitles, showTokens, showSubtitles)
       drawMessageBubblesWorld(ctx, agents, simTimeRef.current)
       drawParticles(ctx, particles, edgeMap, agents, toolCalls, timeRef.current)
       drawEffects(ctx, effectsRef.current)
