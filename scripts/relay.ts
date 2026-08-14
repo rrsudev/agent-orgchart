@@ -9,7 +9,7 @@ import * as path from 'path'
 import * as os from 'os'
 
 import { HookServer } from '../extension/src/hook-server'
-import { AgentEvent, SessionInfo, WatchedSession, StudySessionLifecycle } from '../extension/src/protocol'
+import { AgentEvent, SessionInfo, WatchedSession, StudySessionLifecycle, InteractionRecord } from '../extension/src/protocol'
 import { TranscriptParser } from '../extension/src/transcript-parser'
 import { readNewFileLines, foldPathCase } from '../extension/src/fs-utils'
 import { scanSubagentsDir, readSubagentNewLines } from '../extension/src/subagent-watcher'
@@ -37,18 +37,24 @@ let sessionEventCount = 0
 let studyStorage: StudyStorage | null = null
 
 /** Resolve the study-storage capture sink from the environment.
- *  AGENT_FLOW_STUDY_STORAGE: "1"/"true" → <workspace>/study-storage,
- *  or an explicit path. Unset / "0" / "false" → disabled.
+ *  Capture is ON BY DEFAULT so no session is lost regardless of how the tool is
+ *  deployed — the web/relay path matches the VS Code build, which also captures
+ *  by default. Set AGENT_FLOW_STUDY_STORAGE to "0"/"false" to explicitly opt out.
+ *  AGENT_FLOW_STUDY_STORAGE: unset / "1" / "true" → <workspace>/study-storage,
+ *  an explicit path → that folder, "0" / "false" → disabled.
  *  AGENT_FLOW_STUDY_PARTICIPANT: study-assigned participant id. */
 function resolveStudyStorage(workspace: string, toolVersion: string): StudyStorage | null {
   const raw = process.env.AGENT_FLOW_STUDY_STORAGE
-  if (!raw || raw === '0' || raw.toLowerCase() === 'false') return null
+  // Explicit opt-out only — anything else (including unset) enables capture.
+  if (raw === '0' || raw?.toLowerCase() === 'false') return null
 
   let workspaceRoot = workspace
   try { workspaceRoot = fs.realpathSync(workspace) } catch {}
 
-  const enabledByFlag = raw === '1' || raw.toLowerCase() === 'true'
-  const storageRoot = enabledByFlag
+  // Unset or a truthy flag → default per-workspace folder; a non-flag string is
+  // treated as an explicit capture path.
+  const usesDefaultFolder = !raw || raw === '1' || raw.toLowerCase() === 'true'
+  const storageRoot = usesDefaultFolder
     ? path.join(workspaceRoot, 'study-storage')
     : path.resolve(raw)
 
@@ -445,6 +451,8 @@ export interface Relay {
   handleSSE: (req: http.IncomingMessage, res: http.ServerResponse) => void
   /** Log a study-session lifecycle record from the web UI (no-op if capture off). */
   recordStudySession: (payload: StudySessionLifecycle) => void
+  /** Log a discrete UI interaction (rename) from the web UI (no-op if capture off). */
+  recordInteraction: (payload: InteractionRecord) => void
   /** Clean up all resources */
   dispose: () => void
 }
@@ -636,6 +644,10 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
 
     recordStudySession(payload: StudySessionLifecycle) {
       studyStorage?.recordStudySessionLifecycle(payload)
+    },
+
+    recordInteraction(payload: InteractionRecord) {
+      studyStorage?.recordInteraction(payload)
     },
 
     dispose() {

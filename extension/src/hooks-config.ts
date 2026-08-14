@@ -112,7 +112,7 @@ export async function configureClaudeHooks(): Promise<void> {
   fs.writeFileSync(GLOBAL_SETTINGS_PATH, JSON.stringify(settings, null, 2) + '\n')
 
   vscode.window.showInformationMessage(
-    'Claude Code hooks configured. New sessions will stream events to Agent Flow.',
+    'Claude Code hooks configured. New sessions will stream events to Agent Fruitstand.',
   )
 }
 

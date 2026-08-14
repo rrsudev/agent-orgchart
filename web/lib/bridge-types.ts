@@ -58,6 +58,33 @@ export interface StudySessionLifecycle {
 }
 
 /**
+ * UI-interaction record — a discrete user action in the visualizer that isn't an
+ * agent event (currently: renaming an agent node or a session tab). Emitted from
+ * the web UI (webview→extension / relay POST) and logged distinctively by
+ * StudyStorage so a participant's manual relabeling is recoverable alongside the
+ * event stream.
+ *
+ * Mirrors InteractionRecord in extension/src/protocol.ts — keep in sync.
+ */
+export type InteractionKind = 'agent-rename' | 'session-rename' | 'session-resume'
+
+export interface InteractionRecord {
+  kind: InteractionKind
+  /** ISO wall-clock time the interaction happened. */
+  at: string
+  /** Canvas agent id (agent-rename) — may be session-namespaced in parallel view. */
+  agentId?: string
+  /** Agent/transcript session id this relabeling is scoped to (correlation). */
+  sessionId?: string
+  /** Active study session id, when one is running. */
+  studySessionId?: string
+  /** Label before the change (empty if it had no custom label). */
+  previous?: string
+  /** Label after the change (empty string = cleared back to the default). */
+  next?: string
+}
+
+/**
  * Sentinel "session id" for the parallel view — a pseudo-tab that combines every
  * session and renders all agents at once. When this is the active filter, the
  * simulation applies no per-session filtering and the bridge delivers events

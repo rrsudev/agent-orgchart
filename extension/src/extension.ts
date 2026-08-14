@@ -1,7 +1,9 @@
 import * as vscode from 'vscode'
+import * as fs from 'fs'
 import { VisualizerPanel } from './webview-provider'
 import { JsonlEventSource } from './event-source'
 import { WebviewToExtensionMessage } from './protocol'
+import { findClaudeSessionCwd } from './session-watcher'
 import { startClaudeRuntime } from './claude-runtime'
 import { startCodexRuntime } from './codex-runtime'
 import { promptHookSetupIfNeeded, configureClaudeHooks, isDisable1MContext } from './hooks-config'
@@ -244,6 +246,17 @@ function wirePanel(panel: VisualizerPanel): void {
         studyStorage?.recordStudySessionLifecycle(message.payload)
         break
 
+      case 'ui-interaction':
+        // Distinctive on-disk logging of discrete UI actions (renames).
+        studyStorage?.recordInteraction(message.payload)
+        break
+
+      case 'resume-session':
+        // Reopen the underlying Claude Code chat in a terminal (`claude --resume`)
+        // so a closed tab can be picked back up. User-initiated; observe-only.
+        handleResumeSession(message.sessionId)
+        break
+
       case 'log': {
         const webviewLog = createLogger('Webview')
         const logFn = message.level === 'error' ? webviewLog.error
@@ -306,6 +319,36 @@ async function handleOpenFile(filePath: string, line?: number): Promise<void> {
   } catch (err) {
     log.error(`Failed to open file: ${filePath}`, err)
   }
+}
+
+/**
+ * Resume a Claude Code session in an integrated terminal. Looks up the session's
+ * original cwd from its transcript (Claude keys sessions per-project, so
+ * `claude --resume` must run from that dir), opens a terminal there, and types
+ * the resume command WITHOUT auto-running it — the participant reviews and hits
+ * Enter, so we never silently launch a process on their behalf.
+ */
+function handleResumeSession(sessionId: string): void {
+  const found = findClaudeSessionCwd(sessionId)
+  if (!found) {
+    void vscode.window.showWarningMessage(
+      "Couldn't find a resumable Claude Code session for this tab. It may be a Codex session, or its transcript is no longer on disk.",
+    )
+    return
+  }
+  // Prefer the session's real cwd; fall back to the first workspace folder.
+  const workspaceCwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+  let cwd = found.cwd ?? workspaceCwd
+  if (cwd) { try { if (!fs.existsSync(cwd)) cwd = workspaceCwd } catch { cwd = workspaceCwd } }
+
+  const shortId = sessionId.slice(0, 8)
+  const terminal = vscode.window.createTerminal({
+    name: `Claude · resume ${shortId}`,
+    ...(cwd ? { cwd } : {}),
+  })
+  terminal.show()
+  // Type the command but don't submit it (no trailing newline) — the user runs it.
+  terminal.sendText(`claude --resume ${sessionId}`, false)
 }
 
 export function deactivate(): void {

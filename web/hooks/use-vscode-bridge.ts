@@ -115,6 +115,8 @@ interface BridgeHookResult {
   archivedSessions: SessionInfo[]
   /** Reopen a previously archived session (undo a close) */
   unarchiveSession: (sessionId: string) => void
+  /** Ask the host to resume the underlying Claude Code chat in a terminal. */
+  resumeSession: (sessionId: string) => void
 }
 
 /**
@@ -674,6 +676,10 @@ export function useVSCodeBridge(): BridgeHookResult {
     vscodeBridge?.openFile(filePath, line)
   }, [])
 
+  const resumeSession = useCallback((sessionId: string) => {
+    vscodeBridge?.resumeSession(sessionId)
+  }, [])
+
   return {
     isVSCode,
     connectionStatus,
@@ -696,5 +702,6 @@ export function useVSCodeBridge(): BridgeHookResult {
     sessionRenames,
     archivedSessions,
     unarchiveSession,
+    resumeSession,
   }
 }

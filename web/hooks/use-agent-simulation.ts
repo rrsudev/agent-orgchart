@@ -47,6 +47,11 @@ export function useAgentSimulation(options: UseAgentSimulationOptions = {}) {
   const forceSimRef = useRef<Simulation<ForceNode, ForceLink> | null>(null)
   const blockIdCounter = useRef(0)
   const skipForceSyncRef = useRef(false)
+  // Set just before a tab-switch/reopen cold-start flush: the next batch of
+  // flushed (historical) events should NOT play spawn/fade-in animations — the
+  // session already happened, so we snap it to its settled visual state. A genuine
+  // live spawn (single event arriving while watching) still animates.
+  const coldLoadRef = useRef(false)
   const animateRef = useRef<(timestamp: number) => void>(() => {})
   /** Throttle React UI updates to ~4/sec — canvas stays smooth via frameRef */
   const lastUIUpdateRef = useRef(0)
@@ -89,7 +94,12 @@ export function useAgentSimulation(options: UseAgentSimulationOptions = {}) {
   }, [])
 
   // ─── Force simulation sync ───────────────────────────────────────────────
-  const syncForceSimulation = useCallback((agents: Map<string, Agent>, edges: Edge[]) => {
+  // `reheat` re-runs the layout (alpha bump + settle ticks) so new/changed nodes
+  // find their place. Pass reheat=false to load positions WITHOUT relaxing them —
+  // used when restoring a cached session on tab switch, so the layout (including
+  // any nodes the user hand-dragged) comes back exactly as they left it instead
+  // of the untouched nodes drifting under the force sim.
+  const syncForceSimulation = useCallback((agents: Map<string, Agent>, edges: Edge[], reheat = true) => {
     const sim = forceSimRef.current
     if (!sim) return
 
@@ -108,8 +118,14 @@ export function useAgentSimulation(options: UseAgentSimulationOptions = {}) {
     sim.nodes(nodes)
     const linkForce = sim.force('link') as ReturnType<typeof forceLink> | undefined
     if (linkForce) linkForce.links(links)
-    sim.alpha(0.3).restart()
-    for (let i = 0; i < 15; i++) sim.tick()
+    if (reheat) {
+      sim.alpha(0.3).restart()
+      for (let i = 0; i < 15; i++) sim.tick()
+    } else {
+      // Freeze: keep the loaded positions; a subsequent per-frame tick with ~0
+      // alpha won't move anything until real activity reheats the sim.
+      sim.alpha(0)
+    }
     sim.stop()
   }, [])
 
@@ -251,6 +267,16 @@ export function useAgentSimulation(options: UseAgentSimulationOptions = {}) {
       // Sync simulation clock to latest event so active state renders correctly
       newTime = Math.max(newTime, currentState.currentTime)
       maxT = Math.max(maxT, newTime)
+    }
+
+    // Cold load (tab switch / reopen): the flushed events are historical, so snap
+    // the freshly-built state to its settled visuals instead of fading each node
+    // in. Gated on actually having consumed the flushed batch this frame.
+    if (coldLoadRef.current) {
+      if (capturedEvents && capturedEvents.length > 0) {
+        currentState = snapVisualState(currentState, newTime)
+      }
+      coldLoadRef.current = false
     }
 
     // Append new events to log
@@ -463,8 +489,15 @@ export function useAgentSimulation(options: UseAgentSimulationOptions = {}) {
   const restoreSnapshot = useCallback((snapshot: { simState: SimulationState; blockId: number }) => {
     blockIdCounter.current = snapshot.blockId
     commitState({ ...snapshot.simState, isPlaying: true })
-    setTimeout(() => syncForceSimulation(snapshot.simState.agents, snapshot.simState.edges), 0)
+    // Freeze on restore (reheat=false): bring the layout back EXACTLY as saved —
+    // including hand-dragged nodes — rather than letting the force sim relax it.
+    setTimeout(() => syncForceSimulation(snapshot.simState.agents, snapshot.simState.edges, false), 0)
   }, [syncForceSimulation, commitState])
+
+  /** Mark the next flushed event batch as a historical cold load (tab switch /
+   *  reopen): its nodes snap to settled visuals instead of replaying spawn
+   *  animations. Call right before flushSessionEvents on a cold-start path. */
+  const beginColdLoad = useCallback(() => { coldLoadRef.current = true }, [])
 
   return {
     // Canvas reads frameRef directly for 60fps rendering
@@ -480,7 +513,7 @@ export function useAgentSimulation(options: UseAgentSimulationOptions = {}) {
     conversations: state.conversations,
     play, pause, restart, setSpeed, seekToTime,
     updateAgentPosition,
-    saveSnapshot, restoreSnapshot,
+    saveSnapshot, restoreSnapshot, beginColdLoad,
     loadReplay,
   }
 }

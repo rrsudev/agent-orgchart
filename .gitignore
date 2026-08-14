@@ -27,3 +27,6 @@ extension/.vscode/
 extension/package-lock.json
 
 .DS_Store
+
+# Agent Fruitstand study capture (local research data — do not commit)
+study-storage/

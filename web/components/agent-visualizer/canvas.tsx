@@ -33,6 +33,10 @@ const PREFERS_REDUCED_MOTION =
 interface CanvasProps {
   /** Ref to simulation state — read every frame without React re-renders */
   simulationRef: React.RefObject<SimulationState>
+  /** Identifies the currently-viewed session (or parallel view). Drives
+   *  per-session camera memory so switching tabs restores the exact framing the
+   *  user left, instead of re-fitting every time. */
+  viewKey?: string | null
   selectedAgentId: string | null
   hoveredAgentId: string | null
   showStats: boolean
@@ -66,6 +70,7 @@ interface CanvasProps {
 
 export function AgentCanvas({
   simulationRef,
+  viewKey,
   selectedAgentId, hoveredAgentId, showStats, showTokens, showSubtitles, showHexGrid, zoomToFitTrigger, pauseAutoFit,
   onAgentClick, onAgentHover, onAgentDrag, onContextMenu, onToolCallClick, selectedToolCallId, onDiscoveryClick, selectedDiscoveryId,
   agentColors, agentNames, agentSubtitles, onAgentDoubleClick, onAgentNameClick,
@@ -131,7 +136,7 @@ export function AgentCanvas({
     screenToCanvas, doZoomToFit, updateCamera,
   } = useCanvasCamera({
     mainCanvasRef, drawPropsRef, simTimeRef, dimensions,
-    agentCount: sim.agents.size, zoomToFitTrigger, selectedAgentId,
+    agentCount: sim.agents.size, zoomToFitTrigger, selectedAgentId, viewKey,
   })
 
   // ─── Interaction ────────────────────────────────────────────────────────

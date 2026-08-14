@@ -29,7 +29,7 @@ import * as path from 'path'
 import * as os from 'os'
 import * as crypto from 'crypto'
 
-import type { AgentEvent, StudySessionLifecycle } from './protocol'
+import type { AgentEvent, StudySessionLifecycle, InteractionRecord } from './protocol'
 
 export type StudyRuntime = 'claude' | 'codex'
 
@@ -110,6 +110,8 @@ export class StudyStorage {
   private readonly studySessionsLogPath: string
   /** Root of the per-study-session discrete folders. */
   private readonly studySessionsDir: string
+  /** Top-level, append-only log of discrete UI interactions (renames). */
+  private readonly interactionsLogPath: string
 
   private readonly sessions = new Map<string, SessionRec>()
   /** The study session currently receiving teed events (null between sessions). */
@@ -129,6 +131,7 @@ export class StudyStorage {
     this.manifestPath = path.join(this.root, 'MANIFEST.json')
     this.studySessionsLogPath = path.join(this.root, 'study-sessions.jsonl')
     this.studySessionsDir = path.join(this.root, 'study-sessions')
+    this.interactionsLogPath = path.join(this.root, 'interactions.jsonl')
   }
 
   private warn(...args: unknown[]) {
@@ -472,6 +475,30 @@ export class StudyStorage {
     }
   }
 
+  /**
+   * Record one discrete UI interaction (agent/session rename). Written two ways,
+   * mirroring recordStudySessionLifecycle:
+   *   1. interactions.jsonl (top-level) — an always-present chronological log of
+   *      EVERY interaction, independent of any active study session.
+   *   2. study-sessions/<NNN>-<id>/interactions.jsonl — teed into the active
+   *      study-session folder so a session's manual relabeling sits with its
+   *      event stream. Never throws into the caller.
+   */
+  recordInteraction(p: InteractionRecord): void {
+    if (!this.initialized) this.init()
+    try {
+      const line = { capturedAt: new Date().toISOString(), ...p }
+      this.appendJsonl(this.interactionsLogPath, line)
+      const rec = this.currentStudySession
+      if (rec) {
+        if (p.sessionId) rec.agentSessionIds.add(p.sessionId)
+        this.appendJsonl(path.join(rec.dir, 'interactions.jsonl'), line)
+      }
+    } catch (e) {
+      this.logFailure('recordInteraction', e)
+    }
+  }
+
   private beginStudySession(p: StudySessionLifecycle, capturedAt: string, resumed = false): void {
     // Finalize any dangling active session (a 'started' without a prior 'ended').
     if (this.currentStudySession && this.currentStudySession.id !== p.studySessionId) {
@@ -643,17 +670,17 @@ export class StudyStorage {
       const has = current.split(/\r?\n/).some((l) => l.trim() === entry || l.trim() === entry.replace(/\/$/, ''))
       if (has) return
       const prefix = current.length && !current.endsWith('\n') ? '\n' : ''
-      fs.appendFileSync(giPath, `${prefix}\n# Agent Flow study capture (local research data — do not commit)\n${entry}\n`)
+      fs.appendFileSync(giPath, `${prefix}\n# Agent Fruitstand study capture (local research data — do not commit)\n${entry}\n`)
     } catch (e) {
       this.warn('ensureGitignored failed:', e)
     }
   }
 }
 
-const README_TEMPLATE = `# Agent Flow — study-storage
+const README_TEMPLATE = `# Agent Fruitstand — study-storage
 
 This folder is a local, self-contained capture of your Claude Code / Codex agent
-sessions, produced by the Agent Flow research build. Each session (each visualizer
+sessions, produced by the Agent Fruitstand research build. Each session (each visualizer
 "tab") is stored under \`live/sessions/<runtime>-<session-id>/\`.
 
 ## What's inside a session folder
@@ -682,6 +709,14 @@ timed **study sessions** (each a "work period" they start, pause, and end):
   during that session's window), and \`lifecycle.jsonl\` (that session's own
   markers). The per-tab folders keep recording continuously, so actions *beyond*
   a session's official end remain recoverable there.
+
+## UI interactions
+
+- \`interactions.jsonl\` — a top-level, append-only log of discrete UI actions that
+  aren't agent events (agent-node and session-tab renames, and resuming a closed
+  session's chat in a terminal), each with a timestamp, any before/after label, and
+  the session it applied to. When a study session is active the same records are
+  teed into that session's folder as \`interactions.jsonl\`.
 
 ## How to send your data to the researchers
 

@@ -51,6 +51,19 @@ export function drawAgentBrand(
   else drawClaudeSpark(ctx, cx, cy, r, color)
 }
 
+/** Very subtle centered dot marking a subagent — a quiet stand-in for the brand
+ *  glyph (which is reserved for main agents). Kept low-contrast on purpose so the
+ *  round shape + color + state badge do the talking, not another icon. */
+export function drawSubagentGlyph(ctx: CanvasRenderingContext2D, cx: number, cy: number, half: number, color: string) {
+  ctx.save()
+  ctx.globalAlpha = 0.28
+  ctx.fillStyle = color
+  ctx.beginPath()
+  ctx.arc(cx, cy, Math.max(1.5, half * 0.14), 0, Math.PI * 2)
+  ctx.fill()
+  ctx.restore()
+}
+
 export function drawContextComposition(
   ctx: CanvasRenderingContext2D,
   agent: Agent,
@@ -141,13 +154,24 @@ function getAgentColor(id: string, target: string, dt: number): string {
 
 // ─── Node form: flat squircle card + state badge ─────────────────────────────
 
+/** Trace the node's outline path. Shape encodes hierarchy: main agents are
+ *  squircles (rounded squares), subagents are round — so a subagent is
+ *  distinguishable by SHAPE, not just size (size alone was too weak a cue). */
+function traceNodeShape(ctx: CanvasRenderingContext2D, agent: Agent, half: number, isMain: boolean) {
+  if (isMain) {
+    drawSquircle(ctx, agent.x, agent.y, half, half * NODE_DRAW.cornerScale)
+  } else {
+    ctx.beginPath()
+    ctx.arc(agent.x, agent.y, half, 0, Math.PI * 2)
+  }
+}
+
 function drawNodeCard(
   ctx: CanvasRenderingContext2D,
   agent: Agent, half: number, color: string, cardFill: string,
-  isHovered: boolean, isSelected: boolean, isWaiting: boolean, time: number,
+  isHovered: boolean, isSelected: boolean, isWaiting: boolean, isMain: boolean, time: number,
 ) {
   const emphasis = isHovered || isSelected
-  const radius = half * NODE_DRAW.cornerScale
 
   // Single soft elevation shadow behind a solid card. Fill is white by default,
   // or a soft wash of the user's identity color when one is assigned.
@@ -155,14 +179,14 @@ function drawNodeCard(
   ctx.shadowColor = emphasis ? NODE_DRAW.shadowColorEmphasis : NODE_DRAW.shadowColor
   ctx.shadowBlur = emphasis ? NODE_DRAW.shadowBlurEmphasis : NODE_DRAW.shadowBlur
   ctx.shadowOffsetY = NODE_DRAW.shadowOffsetY
-  drawSquircle(ctx, agent.x, agent.y, half, radius)
+  traceNodeShape(ctx, agent, half, isMain)
   ctx.fillStyle = cardFill
   ctx.fill()
   ctx.restore()
 
   // Hairline border in the (cross-fading) state color. Shape also carries
   // meaning: complete = dashed, waiting = animated dashed, error = heavier.
-  drawSquircle(ctx, agent.x, agent.y, half, radius)
+  traceNodeShape(ctx, agent, half, isMain)
   ctx.strokeStyle = color
   ctx.lineWidth = (agent.state === 'error' || emphasis) ? NODE_DRAW.borderWidthEmphasis : NODE_DRAW.borderWidth
   if (agent.state === 'complete') {
@@ -272,21 +296,26 @@ function drawStateBadge(
  * task still lives in the detail card). Returns the absolute Y of the bottom of
  * the label block, so the caller can push the token bar below it.
  */
-function drawAgentLabel(ctx: CanvasRenderingContext2D, agent: Agent, half: number, isHovered: boolean, name: string, subtitle?: string, showSubtitle = false): number {
+function drawAgentLabel(ctx: CanvasRenderingContext2D, agent: Agent, half: number, isHovered: boolean, isMain: boolean, name: string, subtitle?: string, showSubtitle = false): number {
   ctx.textAlign = 'center'
   ctx.textBaseline = 'top'
   // Generous widths, still well inside the ~200px inter-node spacing. The goal
   // gets a wider box + smaller type so several words fit across its two lines.
-  const nameMaxW = half * 5
+  // Subagents render their FULL name (they have no goal subtitle to lean on, and
+  // the name — "Explore · map the event flow" — carries all the meaning), so they
+  // wrap to as many lines as needed instead of being ellipsis-truncated.
+  const nameMaxW = isMain ? half * 5 : half * 6
   const goalMaxW = half * 7
   const nameLineH = 14
   const goalLineH = 10.5
+  const nameMaxLines = isMain ? 2 : 8
   let y = agent.y + half + AGENT_DRAW.labelYOffset
 
-  // Primary name — up to 2 lines. Type carries hierarchy through weight + size.
+  // Primary name. Main agents cap at 2 lines (the goal subtitle / hover carry the
+  // rest); subagents render fully. Type carries hierarchy through weight + size.
   ctx.fillStyle = isHovered ? COLORS.textPrimary : COLORS.textDim
   ctx.font = `600 12px ${CANVAS_FONT.sans}`
-  for (const line of wrapTextLines(ctx, name, nameMaxW, 2)) {
+  for (const line of wrapTextLines(ctx, name, nameMaxW, nameMaxLines)) {
     ctx.fillText(line, agent.x, y)
     y += nameLineH
   }
@@ -346,7 +375,11 @@ export function drawAgents(
     const userColor = agentColors?.get(id)
     const label = agentNames?.get(id) ?? agent.name
     const subtitle = agentSubtitles?.get(id)
-    const cardFill = userColor ? washOverWhite(userColor, 0.18) : '#ffffff'
+    // Subagents carry no brand glyph — color IS their identifier — so wash their
+    // (usually inherited) identity color a little stronger so it reads at a glance.
+    const cardFill = userColor
+      ? washOverWhite(userColor, agent.isMain ? 0.18 : 0.32)
+      : '#ffffff'
     const isHovered = id === hoveredAgentId
     const isSelected = id === selectedAgentId
     const isWaiting = agent.state === 'waiting_permission'
@@ -365,10 +398,17 @@ export function drawAgents(
     ctx.save()
     ctx.globalAlpha = agent.opacity
 
-    drawNodeCard(ctx, agent, half, color, cardFill, isHovered, isSelected, isWaiting, time)
-    drawAgentBrand(ctx, agent.x, agent.y, half * 2.2, COLORS.textPrimary, agent.runtime)
+    drawNodeCard(ctx, agent, half, color, cardFill, isHovered, isSelected, isWaiting, agent.isMain, time)
+    // Brand glyph (Claude / OpenAI) is reserved for MAIN agents — it was too noisy
+    // repeated on every subagent. Subagents get a very subtle centered dot instead,
+    // so their round body isn't empty but nothing competes with the state badge.
+    if (agent.isMain) {
+      drawAgentBrand(ctx, agent.x, agent.y, half * 2.2, COLORS.textPrimary, agent.runtime)
+    } else {
+      drawSubagentGlyph(ctx, agent.x, agent.y, half, color)
+    }
     drawStateBadge(ctx, agent, radius, half, color, time)
-    const labelBottom = drawAgentLabel(ctx, agent, half, isHovered, label, subtitle, showSubtitles)
+    const labelBottom = drawAgentLabel(ctx, agent, half, isHovered, agent.isMain, label, subtitle, showSubtitles)
 
     // Token/context bar — user-toggleable (showTokens). The context ring was
     // removed; the bar is the only token readout now. When off, nothing is drawn.

@@ -40,6 +40,50 @@ export type { WatchedSession, SubagentState } from './protocol'
 
 const CLAUDE_DIR = path.join(os.homedir(), '.claude', 'projects')
 
+/**
+ * Locate a Claude Code session's transcript by id and read the cwd it ran in.
+ *
+ * Claude stores sessions per-project under ~/.claude/projects/<encoded-cwd>/, so
+ * `claude --resume <id>` must be launched from that original cwd to be found.
+ * The transcript persists on disk after the chat is closed, so this works for
+ * sessions that are no longer being actively watched (the whole point — resuming
+ * a closed tab). Returns null for unknown / non-Claude / codex session ids.
+ */
+export function findClaudeSessionCwd(sessionId: string): { cwd: string | null; filePath: string } | null {
+  // Guard against traversal — a session id is a bare UUID, never a path.
+  if (!sessionId || sessionId.includes('/') || sessionId.includes('\\') || sessionId.includes('..')) return null
+  let projectDirs: string[]
+  try {
+    projectDirs = fs.readdirSync(CLAUDE_DIR, { withFileTypes: true })
+      .filter(d => d.isDirectory())
+      .map(d => path.join(CLAUDE_DIR, d.name))
+  } catch { return null }
+
+  for (const dir of projectDirs) {
+    const filePath = path.join(dir, `${sessionId}.jsonl`)
+    if (!fs.existsSync(filePath)) continue
+    // Read the head of the transcript; the cwd is recorded on an early line.
+    try {
+      const fd = fs.openSync(filePath, 'r')
+      try {
+        const buf = Buffer.alloc(8192)
+        const bytesRead = fs.readSync(fd, buf, 0, 8192, 0)
+        for (const line of buf.toString('utf8', 0, bytesRead).split('\n')) {
+          if (!line.includes('"cwd"')) continue
+          try {
+            const entry = JSON.parse(line)
+            if (typeof entry.cwd === 'string' && entry.cwd) return { cwd: entry.cwd, filePath }
+          } catch { /* malformed line — try next */ }
+        }
+      } finally { fs.closeSync(fd) }
+    } catch { /* unreadable — try next project dir */ }
+    // Transcript exists but carried no readable cwd: found, but let the caller
+    // fall back to the workspace root (the encoded dir name isn't a real path).
+    return { cwd: null, filePath }
+  }
+  return null
+}
+
 export class SessionWatcher implements AgentSessionWatcher {
   private dirWatcher: fs.FSWatcher | null = null
   private dirWatchers = new Map<string, fs.FSWatcher>()

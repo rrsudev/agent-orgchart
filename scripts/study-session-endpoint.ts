@@ -11,11 +11,13 @@
  */
 import type * as http from 'http'
 import type { Relay } from './relay'
-import type { StudySessionLifecycle } from '../extension/src/protocol'
+import type { StudySessionLifecycle, InteractionRecord } from '../extension/src/protocol'
 
 const MAX_BODY_BYTES = 1_000_000
 
 const ACTIONS = new Set(['started', 'paused', 'resumed', 'ended', 'protocol-reached'])
+
+const INTERACTION_KINDS = new Set(['agent-rename', 'session-rename', 'session-resume'])
 
 /** Narrow an untrusted parsed body to a StudySessionLifecycle (or null). */
 function coerceLifecycle(body: unknown): StudySessionLifecycle | null {
@@ -38,11 +40,29 @@ function coerceLifecycle(body: unknown): StudySessionLifecycle | null {
   }
 }
 
-/** Read, size-cap, parse, validate, and forward a study-session POST. Always 204s. */
-export function handleStudySessionPost(
+/** Narrow an untrusted parsed body to an InteractionRecord (or null). */
+function coerceInteraction(body: unknown): InteractionRecord | null {
+  if (!body || typeof body !== 'object') return null
+  const b = body as Record<string, unknown>
+  if (typeof b.kind !== 'string' || !INTERACTION_KINDS.has(b.kind)) return null
+  const str = (v: unknown) => (typeof v === 'string' ? v : undefined)
+  return {
+    kind: b.kind as InteractionRecord['kind'],
+    at: typeof b.at === 'string' ? b.at : new Date().toISOString(),
+    agentId: str(b.agentId),
+    sessionId: str(b.sessionId),
+    studySessionId: str(b.studySessionId),
+    previous: str(b.previous),
+    next: str(b.next),
+  }
+}
+
+/** Read, size-cap, parse the body, then hand the parsed value to `forward`.
+ *  Always responds 204 (best-effort logging must never disturb the participant). */
+function handlePost(
   req: http.IncomingMessage,
   res: http.ServerResponse,
-  relay: Relay,
+  forward: (parsed: unknown) => void,
 ): void {
   const chunks: Buffer[] = []
   let size = 0
@@ -56,14 +76,36 @@ export function handleStudySessionPost(
   req.on('end', () => {
     if (aborted) return
     try {
-      const parsed = JSON.parse(Buffer.concat(chunks).toString('utf-8'))
-      const lifecycle = coerceLifecycle(parsed)
-      if (lifecycle) relay.recordStudySession(lifecycle)
+      forward(JSON.parse(Buffer.concat(chunks).toString('utf-8')))
     } catch { /* malformed — ignore, still 204 below */ }
     res.writeHead(204)
     res.end()
   })
   req.on('error', () => {
     try { res.writeHead(204); res.end() } catch { /* already closed */ }
+  })
+}
+
+/** Read, size-cap, parse, validate, and forward a study-session POST. Always 204s. */
+export function handleStudySessionPost(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  relay: Relay,
+): void {
+  handlePost(req, res, (parsed) => {
+    const lifecycle = coerceLifecycle(parsed)
+    if (lifecycle) relay.recordStudySession(lifecycle)
+  })
+}
+
+/** Read, size-cap, parse, validate, and forward a UI-interaction POST. Always 204s. */
+export function handleInteractionPost(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  relay: Relay,
+): void {
+  handlePost(req, res, (parsed) => {
+    const interaction = coerceInteraction(parsed)
+    if (interaction) relay.recordInteraction(interaction)
   })
 }

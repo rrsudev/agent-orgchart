@@ -10,7 +10,7 @@ import { exec, execFile } from 'child_process'
 import { createRelay } from '../../scripts/relay'
 import { createTelemetryClient } from '../../scripts/telemetry'
 import { serveStatic } from './static'
-import { handleStudySessionPost } from '../../scripts/study-session-endpoint'
+import { handleStudySessionPost, handleInteractionPost } from '../../scripts/study-session-endpoint'
 
 interface ServerOptions {
   port: number
@@ -41,6 +41,11 @@ export async function startServer(options: ServerOptions) {
     // is enabled via AGENT_FLOW_STUDY_STORAGE — otherwise a harmless no-op).
     if (req.method === 'POST' && req.url === '/study-session') {
       return handleStudySessionPost(req, res, relay)
+    }
+
+    // UI-interaction log (renames) — same best-effort/no-op semantics as above.
+    if (req.method === 'POST' && req.url === '/interaction') {
+      return handleInteractionPost(req, res, relay)
     }
 
     // Static files (UI)

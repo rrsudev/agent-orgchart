@@ -7,6 +7,7 @@ import { useSelectionState } from "@/hooks/use-selection-state"
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts"
 import { useAgentColors, agentColorKey, AGENT_KEY_SEP } from "@/hooks/use-agent-colors"
 import { useAgentNames } from "@/hooks/use-agent-names"
+import { logInteraction } from "@/lib/interaction-log"
 import { useSessionCallSigns } from "@/hooks/use-session-callsigns"
 import { resolveSessionName, type SessionName } from "@/lib/callsigns"
 import { AgentCanvas } from "./canvas"
@@ -24,6 +25,7 @@ import { stopPropagationHandlers } from "./shared-ui"
 import { TimelineEvent, SimulationEvent, TIMING, Z } from "@/lib/agent-types"
 import { PARALLEL_VIEW_ID } from "@/lib/bridge-types"
 import { COLORS } from "@/lib/colors"
+import { LayoutProvider } from "@/lib/layout"
 
 import { MessageFeedPanel } from "./message-feed-panel"
 import { LegendPanel } from "./legend-panel"
@@ -86,6 +88,7 @@ export function AgentVisualizer() {
     updateAgentPosition,
     saveSnapshot,
     restoreSnapshot,
+    beginColdLoad,
     loadReplay,
   } = useAgentSimulation({
     useMockData: bridge.useMockData,
@@ -238,10 +241,23 @@ export function AgentVisualizer() {
   const [renaming, setRenaming] = useState<{ agentId: string; x: number; y: number } | null>(null)
   const commitRename = useCallback((value: string) => {
     setRenaming(r => {
-      if (r) setAgentName(agentColorKey(bridge.selectedSessionId, r.agentId), value)
+      if (r) {
+        const key = agentColorKey(bridge.selectedSessionId, r.agentId)
+        const previous = agentNameStore.get(key) ?? ''
+        const next = value.trim()
+        setAgentName(key, value)
+        // Log every rename (incl. clears) for the study, tied to the session.
+        if (next !== previous) {
+          logInteraction({
+            kind: 'agent-rename', agentId: r.agentId,
+            sessionId: bridge.selectedSessionId ?? undefined,
+            studySessionId: study.current?.id, previous, next,
+          })
+        }
+      }
       return null
     })
-  }, [setAgentName, bridge.selectedSessionId])
+  }, [setAgentName, bridge.selectedSessionId, agentNameStore, study])
 
   const [showStats, setShowStats] = useState(false)
   // Token bar visibility — a user preference, persisted across reloads. Defaults
@@ -334,11 +350,21 @@ export function AgentVisualizer() {
         ? undefined
         : sessionCacheRef.current.get(bridge.selectedSessionId)
       if (cached) {
+        // Restore the exact saved layout + camera (per-session camera memory in
+        // the canvas). Don't re-frame — the whole point is that switching back
+        // shows the session precisely as the user left it, hand-dragged nodes
+        // and all — so we DON'T bump the zoom-to-fit trigger here.
         restoreSnapshot(cached.snapshot)
         bridge.flushSessionEvents(bridge.selectedSessionId, cached.eventCount)
       } else {
+        // Cold start: snap the flushed history to settled visuals (no replayed
+        // spawn animations) and re-frame the freshly-built layout.
         restart()
+        beginColdLoad()
         bridge.flushSessionEvents(bridge.selectedSessionId)
+        // Re-frame the incoming session. This resets the camera's userHasNavigated
+        // flag so continuous auto-fit re-engages and pulls the new nodes into view.
+        setZoomToFitTrigger(n => n + 1)
       }
 
       // The incoming session cold-starts/restores as live (isPlaying: true), so
@@ -346,16 +372,9 @@ export function AgentVisualizer() {
       // paused review scrubber while the new session is actually playing.
       setIsReviewing(false)
 
-      // Re-frame the incoming session. This resets the camera's
-      // userHasNavigated flag so continuous auto-fit re-engages and pulls the
-      // new nodes into view — otherwise, if the user had panned/zoomed the
-      // previous session, the incoming agents render off-screen and the tab
-      // looks empty until a manual zoom or a page reload.
-      setZoomToFitTrigger(n => n + 1)
-
       prevSelectedRef.current = bridge.selectedSessionId
     }
-  }, [bridge.selectedSessionId, restart, bridge.flushSessionEvents, saveSnapshot, restoreSnapshot, bridge.getSessionEventCount])
+  }, [bridge.selectedSessionId, restart, beginColdLoad, bridge.flushSessionEvents, saveSnapshot, restoreSnapshot, bridge.getSessionEventCount])
 
   // Timeline events — incremental: only processes new conversation messages
   const timelineCacheRef = useRef<{
@@ -398,6 +417,10 @@ export function AgentVisualizer() {
       play()
     }
   }, [isPlaying, play, pause])
+
+  // Root element for the container-measured layout system (drives responsive
+  // panel sizing/placement — see @/lib/layout).
+  const rootRef = useRef<HTMLDivElement>(null)
 
   // The replay scrubber's seek schedules a resume; keep the ref + its cleanup.
   const resumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -453,9 +476,12 @@ export function AgentVisualizer() {
     setReplaying(null)
     setIsReviewing(false)
     restart()
-    if (bridge.selectedSessionId) bridge.flushSessionEvents(bridge.selectedSessionId)
+    if (bridge.selectedSessionId) {
+      beginColdLoad()
+      bridge.flushSessionEvents(bridge.selectedSessionId)
+    }
     setZoomToFitTrigger(n => n + 1)
-  }, [replaying, restart, bridge])
+  }, [replaying, restart, beginColdLoad, bridge])
 
   // Tab actions must leave replay first, or the switched-in session would render
   // empty (live events are withheld while replaying).
@@ -467,6 +493,26 @@ export function AgentVisualizer() {
     if (replaying) exitReplay()
     bridge.unarchiveSession(id)
   }, [replaying, exitReplay, bridge])
+
+  // Resume a closed session's underlying Claude chat in a terminal. Logged as a
+  // study interaction (reopening a closed session is meaningful behavior).
+  const handleResumeSession = useCallback((id: string) => {
+    bridge.resumeSession(id)
+    logInteraction({ kind: 'session-resume', sessionId: id, studySessionId: study.current?.id })
+  }, [bridge, study])
+
+  // Tab rename — apply, then log it for the study (tied to the agent session).
+  const handleRenameSession = useCallback((id: string, label: string) => {
+    const previous = bridge.sessionRenames.get(id) ?? ''
+    const next = label.trim()
+    bridge.renameSession(id, label)
+    if (next !== previous) {
+      logInteraction({
+        kind: 'session-rename', sessionId: id,
+        studySessionId: study.current?.id, previous, next,
+      })
+    }
+  }, [bridge, study])
 
   // Keyboard shortcuts
   const keyboardActions = useMemo(() => ({
@@ -550,10 +596,13 @@ export function AgentVisualizer() {
         if (remaining.length === 0) restart()
       } else {
         restart()
+        beginColdLoad()
         bridge.flushSessionEvents(PARALLEL_VIEW_ID)
       }
     } else if (bridge.selectedSessionId === id) {
       if (remaining.length > 0) {
+        // Switching to the neighbour is a cold start via the layout effect if it
+        // isn't cached; the effect's own beginColdLoad handles that path.
         bridge.selectSession(remaining[remaining.length - 1].id)
       } else {
         // Last session closed: deselect FIRST (mirrors the parallel branch above).
@@ -565,7 +614,7 @@ export function AgentVisualizer() {
         restart()
       }
     }
-  }, [bridge, restart])
+  }, [bridge, restart, beginColdLoad])
 
   const openFile = useCallback((filePath: string, line?: number) => {
     bridge.bridgeOpenFile(filePath, line)
@@ -579,7 +628,8 @@ export function AgentVisualizer() {
 
   return (
     <OpenFileProvider value={bridge.isVSCode ? openFile : null}>
-    <div className="h-screen w-screen relative overflow-hidden" style={{ background: COLORS.void }}>
+    <div ref={rootRef} className="h-screen w-full max-w-full relative overflow-hidden" style={{ background: COLORS.void }}>
+      <LayoutProvider containerRef={rootRef} isVSCode={bridge.isVSCode}>
       {/* Empty state when no demo and no live data */}
       {isEmpty && (
         <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
@@ -602,6 +652,7 @@ export function AgentVisualizer() {
       {/* Canvas fills everything */}
       <AgentCanvas
         simulationRef={frameRef}
+        viewKey={bridge.selectedSessionId}
         selectedAgentId={selection.selectedAgentId}
         hoveredAgentId={selection.hoveredAgentId}
         showStats={showStats}
@@ -653,9 +704,19 @@ export function AgentVisualizer() {
               // Show the full task; main agents fall back to the session goal.
               task: selectedAgent.task ?? agentSubtitles.get(selectedAgent.id),
             }}
-            onRename={(name) =>
-              setAgentName(agentColorKey(bridge.selectedSessionId, selectedAgent.id), name || null)
-            }
+            onRename={(name) => {
+              const key = agentColorKey(bridge.selectedSessionId, selectedAgent.id)
+              const previous = agentNameStore.get(key) ?? ''
+              const next = (name ?? '').trim()
+              setAgentName(key, name || null)
+              if (next !== previous) {
+                logInteraction({
+                  kind: 'agent-rename', agentId: selectedAgent.id,
+                  sessionId: bridge.selectedSessionId ?? undefined,
+                  studySessionId: study.current?.id, previous, next,
+                })
+              }
+            }}
             onClose={selection.clearAgent}
           />
         </div>
@@ -773,11 +834,12 @@ export function AgentVisualizer() {
         accentColors={sessionAccentColors}
         onSelectSession={handleSelectSession}
         onCloseSession={handleCloseSession}
-        onRenameSession={bridge.renameSession}
+        onRenameSession={handleRenameSession}
         onReorderSession={bridge.reorderSessions}
         archivedSessions={bridge.archivedSessions}
         archivedDisplay={archivedDisplay}
         onReopenSession={handleReopenSession}
+        onResumeSession={bridge.isVSCode ? handleResumeSession : undefined}
         isVSCode={bridge.isVSCode}
         connectionStatus={bridge.connectionStatus}
         agentCount={agents.size}
@@ -860,6 +922,7 @@ export function AgentVisualizer() {
           onCancel={() => setEndConfirmOpen(false)}
         />
       )}
+      </LayoutProvider>
     </div>
     </OpenFileProvider>
   )

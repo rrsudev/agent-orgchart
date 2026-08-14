@@ -143,7 +143,7 @@ function ensureDir(): void {
 
 function getHookScriptContent(): string {
   return `#!/usr/bin/env node
-// Agent Flow hook forwarder v3 — installed by the Agent Flow VS Code extension.
+// Agent Fruitstand hook forwarder v3 — installed by the Agent Fruitstand VS Code extension.
 // Claude Code invokes this as a command hook. It reads a discovery directory to
 // find live extension instances, checks their PIDs, and forwards the event via
 // HTTP POST. Dead instances are cleaned up automatically.

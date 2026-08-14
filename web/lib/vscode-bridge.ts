@@ -6,8 +6,8 @@
  * between the React app and the extension host.
  */
 
-export type { AgentEvent, SessionInfo, ConnectionStatus, StudySessionLifecycle } from './bridge-types'
-import type { AgentEvent, SessionInfo, ConnectionStatus, StudySessionLifecycle } from './bridge-types'
+export type { AgentEvent, SessionInfo, ConnectionStatus, StudySessionLifecycle, InteractionRecord } from './bridge-types'
+import type { AgentEvent, SessionInfo, ConnectionStatus, StudySessionLifecycle, InteractionRecord } from './bridge-types'
 
 type InitCallback = () => void
 type EventCallback = (event: AgentEvent) => void
@@ -159,6 +159,18 @@ class VSCodeBridge {
    *  relay instead — see use-vscode-bridge). */
   sendStudySession(payload: StudySessionLifecycle): void {
     this.postToExtension({ type: 'study-session', payload })
+  }
+
+  /** Forward a UI-interaction record (e.g. an agent/session rename) to the host
+   *  for on-disk logging. No-op outside VS Code (standalone POSTs to the relay). */
+  sendInteraction(payload: InteractionRecord): void {
+    this.postToExtension({ type: 'ui-interaction', payload })
+  }
+
+  /** Ask the host to reopen a Claude Code session in a terminal (`claude
+   *  --resume <id>`). No-op outside VS Code (there's no terminal to open). */
+  resumeSession(sessionId: string): void {
+    this.postToExtension({ type: 'resume-session', sessionId })
   }
 
   private postToExtension(message: Record<string, unknown>): void {

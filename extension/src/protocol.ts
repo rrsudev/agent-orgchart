@@ -66,6 +66,32 @@ export interface StudySessionLifecycle {
   protocolMinimumMs?: number
 }
 
+/**
+ * UI-interaction record — a discrete user action in the visualizer that isn't an
+ * agent event (currently: renaming an agent node or a session tab). Emitted from
+ * the web UI (webview→extension / relay POST) and logged distinctively by
+ * StudyStorage.
+ *
+ * Mirrors InteractionRecord in web/lib/bridge-types.ts — keep in sync.
+ */
+export type InteractionKind = 'agent-rename' | 'session-rename' | 'session-resume'
+
+export interface InteractionRecord {
+  kind: InteractionKind
+  /** ISO wall-clock time the interaction happened. */
+  at: string
+  /** Canvas agent id (agent-rename) — may be session-namespaced in parallel view. */
+  agentId?: string
+  /** Agent/transcript session id this relabeling is scoped to (correlation). */
+  sessionId?: string
+  /** Active study session id, when one is running. */
+  studySessionId?: string
+  /** Label before the change (empty if it had no custom label). */
+  previous?: string
+  /** Label after the change (empty string = cleared back to the default). */
+  next?: string
+}
+
 // ─── Extension → Webview Messages ────────────────────────────────────────────
 
 export type ExtensionToWebviewMessage =
@@ -97,6 +123,8 @@ export type WebviewToExtensionMessage =
   | { type: 'open-file'; filePath: string; line?: number }
   | { type: 'open-external'; url: string }
   | { type: 'study-session'; payload: StudySessionLifecycle }
+  | { type: 'ui-interaction'; payload: InteractionRecord }
+  | { type: 'resume-session'; sessionId: string }
   | { type: 'log'; level: 'info' | 'warn' | 'error'; message: string }
 
 // ─── Transcript Types (from Claude Code JSONL files) ─────────────────────────

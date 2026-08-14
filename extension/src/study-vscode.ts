@@ -83,7 +83,7 @@ export async function setupStudyStorage(context: vscode.ExtensionContext): Promi
       if (!captureAlerted) {
         captureAlerted = true
         void vscode.window.showErrorMessage(
-          `Agent Flow: study capture is failing (${summary}). Recorded data may be incomplete — check capture-errors.log in the storage folder.`,
+          `Agent Fruitstand: study capture is failing (${summary}). Recorded data may be incomplete — check capture-errors.log in the storage folder.`,
         )
       }
     },
@@ -96,7 +96,7 @@ export async function setupStudyStorage(context: vscode.ExtensionContext): Promi
 /** Reveal the capture folder in the OS file explorer. */
 export function revealStudyFolder(storage: StudyStorage | null): void {
   if (!storage) {
-    void vscode.window.showWarningMessage('Agent Flow: study capture is not enabled for this workspace.')
+    void vscode.window.showWarningMessage('Agent Fruitstand: study capture is not enabled for this workspace.')
     return
   }
   void vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(storage.getStorageRoot()))
@@ -109,7 +109,7 @@ export function revealStudyFolder(storage: StudyStorage | null): void {
  */
 export async function packageStudyData(storage: StudyStorage | null): Promise<void> {
   if (!storage) {
-    void vscode.window.showWarningMessage('Agent Flow: study capture is not enabled for this workspace.')
+    void vscode.window.showWarningMessage('Agent Fruitstand: study capture is not enabled for this workspace.')
     return
   }
   // Index the current workspace's capture root, but zip the packaging root —
@@ -119,7 +119,7 @@ export async function packageStudyData(storage: StudyStorage | null): Promise<vo
   const packageRoot = storage.getPackagingRoot()
 
   await vscode.window.withProgress(
-    { location: vscode.ProgressLocation.Notification, title: 'Agent Flow: packaging study data…' },
+    { location: vscode.ProgressLocation.Notification, title: 'Agent Fruitstand: packaging study data…' },
     async () => {
       // Flush the live sessions and rebuild the index so the zip is current.
       storage.dispose()
@@ -141,7 +141,7 @@ export async function packageStudyData(storage: StudyStorage | null): Promise<vo
       } else {
         void vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(packageRoot))
         void vscode.window.showInformationMessage(
-          'Agent Flow: could not auto-zip. Please compress the revealed capture folder and send the zip to the researchers.',
+          'Agent Fruitstand: could not auto-zip. Please compress the revealed capture folder and send the zip to the researchers.',
         )
       }
     },

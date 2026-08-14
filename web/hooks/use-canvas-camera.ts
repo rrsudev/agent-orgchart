@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback, type MutableRefObject } from 'react'
+import { useRef, useEffect, useLayoutEffect, useCallback, type MutableRefObject } from 'react'
 import { Agent, ToolCallNode, Discovery, ANIM, NODE } from '@/lib/agent-types'
 import { BUBBLE_HOLD, BUBBLE_FADE_OUT, BUBBLE_MAX_W, TOOL_CARD_W, TOOL_CARD_H, DISC_BOUNDS_HALF_W, DISC_BOUNDS_HALF_H } from '@/lib/canvas-constants'
 
@@ -27,6 +27,9 @@ interface CameraOptions {
   agentCount: number
   zoomToFitTrigger?: number
   selectedAgentId: string | null
+  /** Currently-viewed session id (or parallel-view sentinel). Camera framing is
+   *  saved/restored per key so switching tabs returns to the exact prior view. */
+  viewKey?: string | null
 }
 
 export function useCanvasCamera({
@@ -37,11 +40,41 @@ export function useCanvasCamera({
   agentCount,
   zoomToFitTrigger,
   selectedAgentId,
+  viewKey,
 }: CameraOptions) {
   const transformRef = useRef<Transform>({ x: 0, y: 0, scale: 1 })
   const userHasNavigatedRef = useRef(false)
   const targetTransformRef = useRef<Transform | null>(null)
   const panVelocityRef = useRef({ vx: 0, vy: 0, active: false })
+
+  // ─── Per-session camera memory ────────────────────────────────────────────
+  // Save the outgoing session's framing when the view changes and restore the
+  // incoming one's, so switching tabs comes back to exactly where the user left
+  // off (companion to the simulation's per-session snapshot restore). A session
+  // with no saved camera falls through to the zoom-to-fit path (cold start).
+  const cameraCacheRef = useRef<Map<string, { transform: Transform; userHasNavigated: boolean }>>(new Map())
+  const prevViewKeyRef = useRef<string | null | undefined>(undefined)
+  useLayoutEffect(() => {
+    const prev = prevViewKeyRef.current
+    if (prev === viewKey) return
+    if (prev != null) {
+      cameraCacheRef.current.set(prev, {
+        transform: { ...transformRef.current },
+        userHasNavigated: userHasNavigatedRef.current,
+      })
+    }
+    const restored = viewKey != null ? cameraCacheRef.current.get(viewKey) : undefined
+    if (restored) {
+      transformRef.current = { ...restored.transform }
+      targetTransformRef.current = null
+      // Suppress auto-fit so the restored framing sticks (mirrors a user pan).
+      userHasNavigatedRef.current = true
+    } else {
+      // Cold view: let the zoom-to-fit trigger frame it fresh.
+      userHasNavigatedRef.current = false
+    }
+    prevViewKeyRef.current = viewKey
+  }, [viewKey])
 
   // Cache for computeFitTransform — avoids O(n) iteration every frame.
   // Invalidates on collection reference change (React creates new Map/array on state updates).

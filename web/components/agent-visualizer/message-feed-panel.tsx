@@ -7,6 +7,7 @@ import type { ConversationMessage } from '@/hooks/simulation/types'
 import { useVirtualList } from '@/hooks/use-virtual-list'
 import { useAutoScroll } from '@/hooks/use-auto-scroll'
 import { TranscriptMessage } from './transcript-message'
+import { useLayout, GUTTER, RAIL_TOP } from '@/lib/layout'
 
 // Only text messages count toward the collapsed "latest message" pill.
 const TEXT_TYPES = new Set(['assistant', 'user', 'thinking'])
@@ -53,6 +54,14 @@ export function MessageFeedPanel({
   const logRef = useRef<HTMLDivElement>(null)
   const agentsRef = useRef(agents)
   agentsRef.current = agents
+
+  // Responsive sizing: clamp to the measured surface so the panel never spills
+  // past a narrow VS Code webview's edges. Right-anchored below the top bar.
+  const layout = useLayout()
+  const panelW = layout.panelWidth(340)
+  const pillW = layout.panelWidth(320)
+  const panelMaxH = Math.min(460, layout.panelHeight(RAIL_TOP + GUTTER))
+  const listMaxH = Math.max(120, panelMaxH - 84)
 
   const [searchQuery, setSearchQuery] = useState('')
   const [showSearch, setShowSearch] = useState(false)
@@ -134,7 +143,7 @@ export function MessageFeedPanel({
         style={{ top: 66, right: 12, zIndex: Z.info, pointerEvents: 'auto' }}
         onClick={() => onOpenChange(true)}
       >
-        <div className="glass-card px-3 py-2 flex items-center gap-2" style={{ maxWidth: 320 }}>
+        <div className="glass-card px-3 py-2 flex items-center gap-2" style={{ maxWidth: pillW }}>
           <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: role.text }} />
           <span className="text-[9px] font-mono font-semibold shrink-0" style={{ color: COLORS.textPrimary }}>
             {agentName.length > COLLAPSED_AGENT_NAME_MAX ? agentName.slice(0, COLLAPSED_AGENT_NAME_MAX) + '…' : agentName}
@@ -155,7 +164,7 @@ export function MessageFeedPanel({
       style={{ top: 66, right: 12, zIndex: Z.info, pointerEvents: 'auto' }}
       onClick={(e) => e.stopPropagation()}
     >
-      <div className="glass-card flex flex-col" style={{ width: 340, maxHeight: 460 }}>
+      <div className="glass-card flex flex-col" style={{ width: panelW, maxHeight: panelMaxH }}>
         {/* Header: sub-tabs + (global) search + collapse */}
         <div className="flex items-center justify-between px-2 pt-2 pb-1.5 gap-2">
           <div className="flex gap-0.5 min-w-0">
@@ -203,7 +212,7 @@ export function MessageFeedPanel({
             ref={logRef}
             onScroll={handleScroll}
             className="flex-1 overflow-y-auto px-2 py-2"
-            style={{ maxHeight: 380, scrollbarWidth: 'thin', scrollbarColor: `${COLORS.scrollbarThumb} transparent` }}
+            style={{ maxHeight: listMaxH, scrollbarWidth: 'thin', scrollbarColor: `${COLORS.scrollbarThumb} transparent` }}
           >
             {sessionMessages.length === 0 ? (
               <EmptyHint text={searchQuery ? 'No matching messages' : 'Waiting for session activity…'} />
@@ -235,7 +244,7 @@ export function MessageFeedPanel({
           <div
             ref={activeLogRef}
             className="flex-1 overflow-y-auto space-y-1.5 px-2 py-2"
-            style={{ maxHeight: 380, scrollbarWidth: 'thin', scrollbarColor: `${COLORS.scrollbarThumb} transparent` }}
+            style={{ maxHeight: listMaxH, scrollbarWidth: 'thin', scrollbarColor: `${COLORS.scrollbarThumb} transparent` }}
           >
             {!threadAgent ? (
               <EmptyHint text="No messages yet" />

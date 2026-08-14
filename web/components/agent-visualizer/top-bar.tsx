@@ -6,27 +6,48 @@ import { COLORS } from "@/lib/colors"
 import { SessionTabs } from "./session-tabs"
 import type { SessionInfo, ConnectionStatus } from "@/lib/bridge-types"
 import type { SessionName } from "@/lib/callsigns"
+import { useLayout } from "@/lib/layout"
 
 // ─── Toggle Button ──────────────────────────────────────────────────────────
+// A segmented on/off switch. The state is legible three ways at once: a leading
+// status dot (filled + glow when on, hollow ring when off — echoing the app's
+// LIVE/idle dots), an accent fill + bold label when on, and `role="switch"` so
+// screen readers announce it as a toggle rather than a plain button.
 
-function ToggleButton({ active, onClick, children, style, activeColor }: {
+function ToggleButton({ active, onClick, children, label, activeColor }: {
   active: boolean
   onClick: () => void
   children: React.ReactNode
-  style?: React.CSSProperties
+  /** Human name of what this toggles, for the tooltip + screen-reader label. */
+  label: string
   activeColor?: { bg: string; text: string }
 }) {
+  const accent = activeColor?.text ?? COLORS.holoBright
   return (
     <button
       onClick={onClick}
-      className="px-2.5 py-1 rounded transition-all"
+      role="switch"
+      aria-checked={active}
+      aria-label={label}
+      title={`${label}: ${active ? 'on' : 'off'} — click to ${active ? 'hide' : 'show'}`}
+      className="flex items-center gap-1.5 px-2.5 py-1 rounded transition-all"
       style={{
-        background: active ? (activeColor?.bg ?? COLORS.toggleActive) : COLORS.toggleInactive,
-        border: `1px solid ${COLORS.toggleBorder}`,
-        color: active ? (activeColor?.text ?? COLORS.holoBright) : COLORS.textMuted,
-        ...style,
+        background: active ? (activeColor?.bg ?? COLORS.toggleActive) : 'transparent',
+        color: active ? accent : COLORS.textMuted,
+        fontWeight: active ? 600 : undefined,
       }}
     >
+      <span
+        aria-hidden="true"
+        className="inline-block rounded-full transition-all"
+        style={{
+          width: 7,
+          height: 7,
+          background: active ? accent : 'transparent',
+          border: `1.5px solid ${active ? accent : COLORS.textMuted}`,
+          boxShadow: active ? `0 0 6px ${accent}` : 'none',
+        }}
+      />
       {children}
     </button>
   )
@@ -36,10 +57,12 @@ function ToggleButton({ active, onClick, children, style, activeColor }: {
 // Lists every archived (closed) session so any one can be reopened directly —
 // selection, not a LIFO undo. Newest-closed first.
 
-function ClosedTabsMenu({ archived, display, onReopen }: {
+function ClosedTabsMenu({ archived, display, onReopen, onResume }: {
   archived: SessionInfo[]
   display: Map<string, SessionName>
   onReopen: (id: string) => void
+  /** Reopen the underlying Claude chat in a terminal. Only set inside VS Code. */
+  onResume?: (id: string) => void
 }) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
@@ -86,15 +109,27 @@ function ClosedTabsMenu({ archived, display, onReopen }: {
           {items.map(s => {
             const disp = display.get(s.id) ?? { name: s.label }
             return (
-            <button
-              key={s.id}
-              onClick={() => { onReopen(s.id); setOpen(false) }}
-              className="px-2.5 py-1.5 rounded text-left transition-colors hover:bg-black/5 truncate"
-              style={{ color: COLORS.textDim }}
-              title={disp.goal ? `Reopen "${disp.name}" — ${disp.goal}` : `Reopen "${disp.name}"`}
-            >
-              {disp.name}
-            </button>
+            <div key={s.id} className="flex items-center gap-0.5">
+              <button
+                onClick={() => { onReopen(s.id); setOpen(false) }}
+                className="flex-1 min-w-0 px-2.5 py-1.5 rounded text-left transition-colors hover:bg-black/5 truncate"
+                style={{ color: COLORS.textDim }}
+                title={disp.goal ? `Reopen "${disp.name}" — ${disp.goal}` : `Reopen "${disp.name}"`}
+              >
+                {disp.name}
+              </button>
+              {onResume && (
+                <button
+                  onClick={() => { onResume(s.id); setOpen(false) }}
+                  className="shrink-0 px-1.5 py-1.5 rounded transition-colors hover:bg-black/5"
+                  style={{ color: COLORS.textMuted }}
+                  aria-label={`Resume "${disp.name}" in a terminal`}
+                  title="Resume this chat in a terminal (claude --resume)"
+                >
+                  <span aria-hidden="true" className="text-[11px]">▷_</span>
+                </button>
+              )}
+            </div>
           )})}
         </div>
       )}
@@ -141,6 +176,8 @@ export interface TopBarProps {
   /** Display resolution (call-sign / rename + goal) for archived sessions. */
   archivedDisplay: Map<string, SessionName>
   onReopenSession: (id: string) => void
+  /** Resume a closed session's Claude chat in a terminal (VS Code only). */
+  onResumeSession?: (id: string) => void
   // Connection
   isVSCode: boolean
   connectionStatus: ConnectionStatus
@@ -163,7 +200,7 @@ export interface TopBarProps {
 export const TopBar = memo(function TopBar({
   sessions, sessionDisplay, selectedSessionId, sessionsWithActivity, accentColors,
   onSelectSession, onCloseSession, onRenameSession, onReorderSession,
-  archivedSessions, archivedDisplay, onReopenSession,
+  archivedSessions, archivedDisplay, onReopenSession, onResumeSession,
   isVSCode, connectionStatus,
   agentCount,
   showFileAttention, showChat, showTokens,
@@ -171,8 +208,13 @@ export const TopBar = memo(function TopBar({
   onNewAgent,
   onReturnToStudy,
 }: TopBarProps) {
+  const { compact, narrow } = useLayout()
+  // Tighten insets + spacing as the surface narrows so the control cluster stays
+  // on one row instead of overflowing a docked VS Code column.
+  const inset = narrow ? "left-2 right-2" : compact ? "left-3 right-3" : "left-4 right-4"
+  const gap = narrow ? "gap-2" : compact ? "gap-3" : "gap-5"
   return (
-    <div className="absolute top-4 left-4 right-4 flex items-center gap-5 font-mono text-[14px] font-medium" style={{ zIndex: Z.info }}>
+    <div className={`absolute top-4 ${inset} flex items-center ${gap} font-mono text-[14px] font-medium`} style={{ zIndex: Z.info }}>
       {/* Session tabs — scrollable, takes available space */}
       {sessions.length > 1 && (
         <div className="min-w-0 flex-shrink">
@@ -194,8 +236,8 @@ export const TopBar = memo(function TopBar({
       <div className="flex-1" />
 
       {/* Right-side info/controls */}
-      <div className="flex items-center gap-5 flex-shrink-0" style={{ color: COLORS.textMuted }}>
-        <ClosedTabsMenu archived={archivedSessions} display={archivedDisplay} onReopen={onReopenSession} />
+      <div className={`flex items-center ${gap} flex-shrink-0`} style={{ color: COLORS.textMuted }}>
+        <ClosedTabsMenu archived={archivedSessions} display={archivedDisplay} onReopen={onReopenSession} onResume={onResumeSession} />
         <button
           onClick={onNewAgent}
           className="px-2.5 py-1 rounded transition-all"
@@ -211,14 +253,20 @@ export const TopBar = memo(function TopBar({
         {isVSCode && <ConnectionIndicator status={connectionStatus} />}
         <span>{agentCount} agents</span>
 
-        {/* View toggles — panels + the per-node token bar */}
-        <div className="flex items-center gap-1.5 px-1.5 py-1 rounded" style={{
-          background: COLORS.holoBg03,
-          border: `1px solid ${COLORS.holoBorder06}`,
-        }}>
-          <ToggleButton active={showFileAttention} onClick={onToggleFiles} style={{ background: showFileAttention ? undefined : 'transparent', border: 'none' }}>Files</ToggleButton>
-          <ToggleButton active={showChat} onClick={onToggleChat} style={{ background: showChat ? undefined : 'transparent', border: 'none' }}>Chat</ToggleButton>
-          <ToggleButton active={showTokens} onClick={onToggleTokens} style={{ background: showTokens ? undefined : 'transparent', border: 'none' }}>Tokens</ToggleButton>
+        {/* View toggles — a segmented group of on/off switches for the panels +
+            the per-node token bar. */}
+        <div
+          role="group"
+          aria-label="View toggles"
+          className="flex items-center gap-1 px-1 py-1 rounded-lg"
+          style={{
+            background: COLORS.holoBg03,
+            border: `1px solid ${COLORS.holoBorder06}`,
+          }}
+        >
+          <ToggleButton active={showFileAttention} onClick={onToggleFiles} label="File-attention panel">Files</ToggleButton>
+          <ToggleButton active={showChat} onClick={onToggleChat} label="Conversation panel">Chat</ToggleButton>
+          <ToggleButton active={showTokens} onClick={onToggleTokens} label="Per-node token bar">Tokens</ToggleButton>
         </div>
 
         {/* Return to the study platform — corner of the tool */}

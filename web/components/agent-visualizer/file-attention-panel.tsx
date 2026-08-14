@@ -4,6 +4,7 @@ import { FileAttention, Z } from '@/lib/agent-types'
 import { COLORS } from '@/lib/colors'
 import { formatTokens, truncatePath } from '@/lib/utils'
 import { PanelHeader, ProgressBar, SlidingPanel } from './shared-ui'
+import { useLayout, GUTTER, RAIL_TOP, RAIL_BOTTOM } from '@/lib/layout'
 
 interface FileAttentionPanelProps {
   visible: boolean
@@ -13,6 +14,8 @@ interface FileAttentionPanelProps {
 }
 
 export function FileAttentionPanel({ visible, fileAttention, onClose, onOpenFile }: FileAttentionPanelProps) {
+  const layout = useLayout()
+
   if (!visible) return null
 
   const files = Array.from(fileAttention.values())
@@ -20,12 +23,18 @@ export function FileAttentionPanel({ visible, fileAttention, onClose, onOpenFile
 
   const maxTokens = Math.max(...files.map(f => f.totalTokens), 1)
 
+  // Left rail, below the top bar. Kept opposite the right-anchored conversation
+  // feed so the two never stack on the same corner in a narrow webview; width
+  // and list height clamp to the measured surface.
+  const listMaxH = Math.min(300, Math.max(120, layout.panelHeight(RAIL_TOP + GUTTER, RAIL_BOTTOM) - 56))
+
   return (
     <SlidingPanel
       visible={visible}
-      position={{ top: 48, right: 12 }}
+      position={{ top: RAIL_TOP, left: GUTTER }}
+      offset={-20}
       zIndex={Z.sidePanel}
-      width={260}
+      width={layout.panelWidth(260)}
     >
       <div className="glass-card relative">
         <PanelHeader onClose={onClose}>
@@ -35,7 +44,7 @@ export function FileAttentionPanel({ visible, fileAttention, onClose, onOpenFile
         </PanelHeader>
 
         {/* File list */}
-        <div className="space-y-1 max-h-[300px] overflow-y-auto">
+        <div className="space-y-1 overflow-y-auto" style={{ maxHeight: listMaxH }}>
           {files.length === 0 && (
             <div className="text-[9px] font-mono py-2 text-center" style={{ color: COLORS.textMuted }}>
               No files accessed yet

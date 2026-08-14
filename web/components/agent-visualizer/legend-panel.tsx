@@ -168,13 +168,13 @@ export function LegendPanel({ visible, onClose, onOpen }: LegendPanelProps) {
                 <span className="inline-flex shrink-0 items-center justify-center" style={{ width: 18, height: 18 }}>
                   <span style={{ width: 15, height: 15, borderRadius: 6, background: '#fff', border: `1.25px solid ${COLORS.idle}` }} />
                 </span>
-                <span style={{ color: COLORS.textPrimary }}>Main agent (large)</span>
+                <span style={{ color: COLORS.textPrimary }}>Main agent (square, branded)</span>
               </Row>
               <Row>
                 <span className="inline-flex shrink-0 items-center justify-center" style={{ width: 18, height: 18 }}>
-                  <span style={{ width: 11, height: 11, borderRadius: 4, background: '#fff', border: `1.25px solid ${COLORS.idle}` }} />
+                  <span style={{ width: 12, height: 12, borderRadius: '50%', background: '#fff', border: `1.25px solid ${COLORS.idle}` }} />
                 </span>
-                <span style={{ color: COLORS.textPrimary }}>Sub-agent (small)</span>
+                <span style={{ color: COLORS.textPrimary }}>Sub-agent (round, color-coded)</span>
               </Row>
 
               <SectionLabel>Connections</SectionLabel>

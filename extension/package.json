@@ -1,14 +1,11 @@
 {
   "name": "agent-flow-study",
-  "displayName": "Agent Flow — Study Build",
-  "description": "Real-time visualization of Claude Code and Codex agent orchestration (research study build)",
-  "version": "1.0.0",
+  "displayName": "Agent Fruitstand",
+  "description": "Beta — a lightweight local companion that lays out your Claude Code agents as they branch, work, and hand off, right inside the editor.",
+  "version": "1.1.0",
+  "preview": true,
   "publisher": "agentflow-study",
   "license": "Apache-2.0",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/patoles/agent-flow"
-  },
   "icon": "media/icon.png",
   "engines": {
     "vscode": "^1.85.0"
@@ -24,33 +21,33 @@
     "commands": [
       {
         "command": "agentFlowStudy.open",
-        "title": "Open Agent Flow",
-        "category": "Agent Flow"
+        "title": "Open Agent Fruitstand",
+        "category": "Agent Fruitstand"
       },
       {
         "command": "agentFlowStudy.openToSide",
-        "title": "Open Agent Flow to Side",
-        "category": "Agent Flow"
+        "title": "Open Agent Fruitstand to Side",
+        "category": "Agent Fruitstand"
       },
       {
         "command": "agentFlowStudy.connectToAgent",
         "title": "Connect to Running Agent",
-        "category": "Agent Flow"
+        "category": "Agent Fruitstand"
       },
       {
         "command": "agentFlowStudy.configureHooks",
         "title": "Configure Claude Code Hooks",
-        "category": "Agent Flow"
+        "category": "Agent Fruitstand"
       },
       {
         "command": "agentFlowStudy.revealStudyFolder",
         "title": "Reveal Study Data Folder",
-        "category": "Agent Flow"
+        "category": "Agent Fruitstand"
       },
       {
         "command": "agentFlowStudy.packageStudyData",
         "title": "Package Study Data (Zip)",
-        "category": "Agent Flow"
+        "category": "Agent Fruitstand"
       }
     ],
     "keybindings": [
@@ -61,7 +58,7 @@
       }
     ],
     "configuration": {
-      "title": "Agent Flow",
+      "title": "Agent Fruitstand",
       "properties": {
         "agentFlowStudy.runtime": {
           "type": "string",
