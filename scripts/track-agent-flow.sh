@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Track which live VS Code window is receiving Claude Code hook events for each
 # workspace. The discovery files in ~/.claude/agent-flow/ are the source of truth:
-# one per activated Agent Flow instance, naming its hook-server port + PID + workspace.
+# one per activated Agent Fruitstand instance, naming its hook-server port + PID + workspace.
 #
 # Usage:
 #   scripts/track-agent-flow.sh          # snapshot
@@ -12,7 +12,7 @@ set -euo pipefail
 DIR="$HOME/.claude/agent-flow"
 
 show() {
-  printf '\n=== Agent Flow instances receiving hooks ===\n'
+  printf '\n=== Agent Fruitstand instances receiving hooks ===\n'
   local found=0
   for f in "$DIR"/*.json; do
     [ -e "$f" ] || continue
@@ -38,7 +38,7 @@ show() {
     fi
     printf '\n'
   done
-  [ "$found" = 0 ] && printf '  (none — no Agent Flow window is registered; open the panel in the window that has your project)\n\n'
+  [ "$found" = 0 ] && printf '  (none — no Agent Fruitstand window is registered; open the panel in the window that has your project)\n\n'
   return 0
 }
 

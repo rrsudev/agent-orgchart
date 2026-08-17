@@ -1,5 +1,5 @@
 /**
- * Agent Flow — standalone web app for visualizing AI agent orchestration.
+ * Agent Fruitstand — standalone web app for visualizing AI agent orchestration.
  *
  * Starts a local server that:
  *   1. Receives events from agent hooks
@@ -15,7 +15,7 @@ import { startServer } from './server'
 
 const args = parseArgs(process.argv.slice(2))
 
-console.log('Agent Flow\n')
+console.log('Agent Fruitstand\n')
 
 // Ensure hooks are configured
 ensureSetup()

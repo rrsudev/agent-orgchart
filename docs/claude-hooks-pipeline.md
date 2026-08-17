@@ -1,6 +1,6 @@
 # Claude Hooks → Interface Display Pipeline
 
-How Agent Flow turns raw Claude Code activity into the live node-graph you see in
+How Agent Fruitstand turns raw Claude Code activity into the live node-graph you see in
 the visualizer. This document traces the full path — from the hooks Claude Code
 fires, through ingestion, normalization, transport, and finally the React/canvas
 render loop.
@@ -71,7 +71,7 @@ Two facts shape the whole design:
 
 ### 1.1 What gets configured, and where
 
-Agent Flow registers **nine** Claude Code hook events. This happens in two
+Agent Fruitstand registers **nine** Claude Code hook events. This happens in two
 equivalent places:
 
 - **VS Code extension:** `configureClaudeHooks()` in
@@ -101,7 +101,7 @@ Each event is a **command hook** (not an HTTP-url hook), of the shape
               "timeout": 2 }] }
 ```
 
-The merge into `settings.json` is idempotent: existing Agent Flow entries
+The merge into `settings.json` is idempotent: existing Agent Fruitstand entries
 (detected by the `agent-flow/hook.js` marker or a legacy `http://127.0.0.1:` url)
 are filtered out and re-appended, so foreign hooks are preserved
 (`hooks-config.ts:97-105`). A legacy migration (`migrateHttpHooks`,
@@ -110,7 +110,7 @@ are filtered out and re-appended, so foreign hooks are preserved
 ### 1.2 The forwarder script (`~/.claude/agent-flow/hook.js`)
 
 A command hook can't POST to an HTTP server directly, and hard-coding a port in
-`settings.json` would be racy across multiple VS Code windows. So Agent Flow
+`settings.json` would be racy across multiple VS Code windows. So Agent Fruitstand
 installs a tiny Node forwarder script and uses a **discovery-file** mechanism.
 The script is generated in `discovery.ts:144` (`getHookScriptContent`) / mirrored
 in `setup.js:44`, written atomically (temp + rename, mode `0o755`).
@@ -121,7 +121,7 @@ The script (`discovery.ts:156-247`):
 1. Parses `.cwd` from the payload.
 2. Reads discovery files in `~/.claude/agent-flow/*.json` (excluding
    `workspaces.json`). Each is `{ port, pid, workspace }`, written by a live
-   Agent Flow instance.
+   Agent Fruitstand instance.
 3. Removes dead instances (`process.kill(pid, 0)` check; skipped on Windows).
 4. Finds workspaces that **contain** the `cwd` (equal or a parent dir), and
    picks the **longest match** (most specific), so `/project/sub` beats
@@ -182,7 +182,7 @@ Events are fired through a `vscode.EventEmitter` exposed as `onEvent`.
 Claude Code writes a JSONL transcript per session at
 `~/.claude/projects/<encoded-workspace>/<sessionId>.jsonl` (the workspace path is
 encoded by replacing every non-alphanumeric char with `-`), plus subagent
-sub-files under `<sessionId>/subagents/*.jsonl`. Agent Flow tails these as a
+sub-files under `<sessionId>/subagents/*.jsonl`. Agent Fruitstand tails these as a
 second, richer source (and the sole source when the hook port is already owned).
 
 ### 2.1 SessionWatcher — discovery and tailing

@@ -1,8 +1,10 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef, memo } from 'react'
-import { TimelineEvent, Z, POPUP, TIMING } from '@/lib/agent-types'
+import { TimelineEvent, POPUP, TIMING } from '@/lib/agent-types'
 import { COLORS } from '@/lib/colors'
+import { useLayout } from '@/lib/layout'
+import { ChromeButton, Icon, StatusDot } from './chrome'
 
 interface ControlBarProps {
   isPlaying: boolean
@@ -85,9 +87,38 @@ function useScrubberEvents(timelineEvents: TimelineEvent[], totalDuration: numbe
   return fullEventsRef.current
 }
 
+/**
+ * The transport bar. It no longer positions itself — the bottom dock places it
+ * in the same center slot the live session timer uses (the two never coexist),
+ * which is what keeps them from stacking on a narrow surface. It only decides
+ * how wide it wants to be, clamped to the measured surface.
+ */
 export function ControlBar(props: ControlBarProps) {
   const { isReviewing = false } = props
   return isReviewing ? <ReviewControlBar {...props} /> : <LiveControlBar {...props} />
+}
+
+/** Shared shell: one dense glass card that fills the dock's centre slot.
+ *
+ *  `width: 100%` of the slot rather than a width derived from the surface — the
+ *  dock's left slot (the legend launcher) and its gaps have already taken their
+ *  share by the time this renders, so sizing against the full surface made the
+ *  bar overhang the right edge on every mid-width window. */
+function BarShell({ children }: { children: React.ReactNode }) {
+  const layout = useLayout()
+  return (
+    <div
+      className="glass-card is-dense flex items-center min-w-0"
+      style={{
+        width: '100%',
+        maxWidth: layout.panelWidth(POPUP.controlBarMaxWidth),
+        gap: layout.narrow ? 6 : 10,
+        paddingInline: 12,
+      }}
+    >
+      {children}
+    </div>
+  )
 }
 
 // ─── Live Mode Control Bar ───────────────────────────────────────────────────
@@ -96,6 +127,7 @@ function LiveControlBar({
   currentTime, totalDuration, timelineEvents,
   eventCount = 0, onEnterReview, isReviewing,
 }: ControlBarProps) {
+  const { compact } = useLayout()
   const [pulseOn, setPulseOn] = useState(true)
   const scrubberEvents = useScrubberEvents(timelineEvents, totalDuration)
 
@@ -106,60 +138,41 @@ function LiveControlBar({
   }, [isReviewing])
 
   return (
-    <div
-      className="absolute bottom-4 left-4 right-4 mx-auto"
-      style={{ pointerEvents: 'auto', maxWidth: POPUP.controlBarMaxWidth, zIndex: Z.controlBar }}
-    >
-      <div className="glass-card px-7 py-4 flex items-center gap-4">
-        {/* LIVE badge */}
-        <div className="flex items-center gap-1.5 shrink-0">
-          <span
-            className="w-2.5 h-2.5 rounded-full transition-opacity duration-500"
-            style={{
-              background: COLORS.liveDot,
-              boxShadow: pulseOn ? `0 0 10px ${COLORS.liveDot}, 0 0 20px rgba(255,68,68,0.3)` : `0 0 5px ${COLORS.liveDot}80`,
-              opacity: pulseOn ? 1 : 0.6,
-            }}
-          />
-          <span className="text-[13px] font-mono font-semibold tracking-wider" style={{ color: COLORS.liveText }}>
-            LIVE
-          </span>
-        </div>
-
-        {/* Time */}
-        <span className="text-sm font-mono shrink-0" style={{ color: COLORS.textPrimary }}>
-          {formatTime(currentTime)}
-        </span>
-
-        {/* Read-only event track */}
-        <div className="flex-1 relative h-6 flex items-center">
-          <div
-            className="w-full rounded-full relative"
-            style={{ height: 3, background: COLORS.holoBg10 }}
-          >
-            <EventMarkers events={scrubberEvents} totalDuration={totalDuration} eventCount={scrubberEvents.length} className="opacity-80" />
-          </div>
-        </div>
-
-        {/* Event count */}
-        <span className="text-[13px] font-mono font-medium shrink-0" style={{ color: COLORS.textMuted }}>
-          {eventCount}
-        </span>
-
-        {/* Review button */}
-        <button
-          onClick={onEnterReview}
-          className="px-3.5 py-1.5 rounded text-[13px] font-mono font-medium transition-all hover:scale-105"
+    <BarShell>
+      {/* LIVE badge */}
+      <div className="flex items-center gap-1.5 shrink-0">
+        <span
+          className="w-2 h-2 rounded-full transition-opacity duration-500"
           style={{
-            background: COLORS.holoBg10,
-            border: `1px solid ${COLORS.reviewBtnBorder}`,
-            color: COLORS.textPrimary,
+            background: COLORS.liveDot,
+            boxShadow: pulseOn ? `0 0 10px ${COLORS.liveDot}` : `0 0 5px ${COLORS.liveDot}80`,
+            opacity: pulseOn ? 1 : 0.6,
           }}
-        >
-          ⏸ Review
-        </button>
+        />
+        {!compact && (
+          <span className="ui-xs font-semibold tracking-wider" style={{ color: COLORS.liveText }}>LIVE</span>
+        )}
       </div>
-    </div>
+
+      <span className="ui-sm ui-num shrink-0" style={{ color: COLORS.textPrimary }}>
+        {formatTime(currentTime)}
+      </span>
+
+      {/* Read-only event track */}
+      <div className="flex-1 min-w-0 relative h-5 flex items-center">
+        <div className="w-full rounded-full relative" style={{ height: 3, background: COLORS.holoBg10 }}>
+          <EventMarkers events={scrubberEvents} totalDuration={totalDuration} eventCount={scrubberEvents.length} className="opacity-80" />
+        </div>
+      </div>
+
+      <span className="ui-xs ui-num shrink-0" style={{ color: COLORS.textMuted }} title={`${eventCount} events`}>
+        {eventCount}
+      </span>
+
+      <ChromeButton size="sm" icon="pause" iconOnly={compact} onClick={onEnterReview} aria-label="Review" title="Pause and scrub back through this session">
+        Review
+      </ChromeButton>
+    </BarShell>
   )
 }
 
@@ -172,6 +185,7 @@ function ReviewControlBar({
   onPlayPause, onRestart, onSpeedChange, onSeek,
   timelineEvents, isReviewing, onResumeLive,
 }: ControlBarProps) {
+  const { compact, narrow } = useLayout()
   const scrubberRef = useRef<HTMLDivElement>(null)
   const [isScrubbing, setIsScrubbing] = useState(false)
   const scrubberEvents = useScrubberEvents(timelineEvents, totalDuration)
@@ -197,123 +211,135 @@ function ReviewControlBar({
   }, [isScrubbing, scrubToClientX])
 
   return (
-    <div
-      className="absolute bottom-4 left-4 right-4 mx-auto"
-      style={{ pointerEvents: 'auto', maxWidth: POPUP.controlBarMaxWidth, zIndex: Z.controlBar }}
-    >
-      <div className="glass-card px-7 py-4 flex items-center gap-4">
-        {/* Play/Pause */}
-        <button
-          onClick={onPlayPause}
-          className="w-11 h-11 rounded-full flex items-center justify-center transition-all shrink-0 hover:scale-110"
-          style={{
-            background: isPlaying ? COLORS.playBtnActiveBg : COLORS.playBtnBg,
-            border: `1.5px solid ${COLORS.playBtnBorder}`,
-            boxShadow: COLORS.playBtnGlow,
-          }}
-        >
-          <span style={{ color: COLORS.textPrimary, fontSize: 18, marginLeft: isPlaying ? 0 : 2 }}>
-            {isPlaying ? '⏸' : '▶'}
-          </span>
-        </button>
+    <BarShell>
+      {/* Play/Pause — sized to the standard control height so it sits on the
+          same baseline as the buttons beside it instead of towering over them. */}
+      <button
+        onClick={onPlayPause}
+        aria-label={isPlaying ? 'Pause playback' : 'Play'}
+        title={isPlaying ? 'Pause playback' : 'Play'}
+        className="rounded-full flex items-center justify-center transition-transform shrink-0 hover:scale-105"
+        style={{
+          width: 'var(--ctl-h)',
+          height: 'var(--ctl-h)',
+          background: isPlaying ? COLORS.playBtnActiveBg : COLORS.playBtnBg,
+          border: `1px solid ${COLORS.playBtnBorder}`,
+          color: COLORS.textPrimary,
+        }}
+      >
+        <Icon name={isPlaying ? 'pause' : 'play'} size={13} />
+      </button>
 
-        {/* Time */}
-        <span className="text-sm font-mono shrink-0" style={{ color: COLORS.textPrimary, minWidth: 48 }}>
-          {formatTime(currentTime)}
-        </span>
+      <span className="ui-sm ui-num shrink-0" style={{ color: COLORS.textPrimary }}>
+        {formatTime(currentTime)}
+      </span>
 
-        {/* Timeline scrubber */}
+      {/* Timeline scrubber */}
+      <div
+        ref={scrubberRef}
+        role="slider"
+        aria-label="Playback position"
+        aria-valuemin={0}
+        aria-valuemax={Math.round(totalDuration)}
+        aria-valuenow={Math.round(currentTime)}
+        aria-valuetext={formatTime(currentTime)}
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (!onSeek) return
+          const step = e.shiftKey ? 10 : 1
+          if (e.key === 'ArrowLeft') { e.preventDefault(); onSeek(Math.max(0, currentTime - step)) }
+          else if (e.key === 'ArrowRight') { e.preventDefault(); onSeek(Math.min(totalDuration, currentTime + step)) }
+          else if (e.key === 'Home') { e.preventDefault(); onSeek(0) }
+          else if (e.key === 'End') { e.preventDefault(); onSeek(totalDuration) }
+        }}
+        className="flex-1 min-w-0 relative h-6 flex items-center group cursor-pointer"
+        onMouseDown={(e) => {
+          e.preventDefault()
+          setIsScrubbing(true)
+          scrubToClientX(e.clientX)
+        }}
+      >
         <div
-          ref={scrubberRef}
-          className="flex-1 relative h-8 flex items-center group cursor-pointer"
-          onMouseDown={(e) => {
-            e.preventDefault()
-            setIsScrubbing(true)
-            scrubToClientX(e.clientX)
-          }}
+          className="w-full rounded-full relative transition-all duration-150 group-hover:h-2"
+          style={{ height: isScrubbing ? 8 : 4, background: COLORS.glassBorder }}
         >
+          {/* Progress fill */}
           <div
-            className="w-full rounded-full relative transition-all duration-150 group-hover:h-2"
-            style={{ height: isScrubbing ? 8 : 4, background: COLORS.glassBorder }}
-          >
-            {/* Progress fill */}
-            <div
-              className="h-full rounded-full transition-[width]"
-              style={{
-                width: `${progress * 100}%`,
-                background: COLORS.scrubberFill,
-              }}
-            />
-            <EventMarkers
-              events={scrubberEvents}
-              totalDuration={totalDuration}
-              eventCount={scrubberEvents.length}
-              className="opacity-60 group-hover:opacity-100 transition-opacity"
-            />
-          </div>
-
-          {/* Playhead */}
-          <div
-            className="absolute top-1/2 -translate-y-1/2 rounded-full transition-all duration-150 group-hover:w-4 group-hover:h-4"
-            style={{
-              left: `${progress * 100}%`,
-              width: isScrubbing ? 16 : 12,
-              height: isScrubbing ? 16 : 12,
-              marginLeft: isScrubbing ? -8 : -6,
-              background: COLORS.textPrimary,
-              boxShadow: COLORS.scrubberHeadGlow,
-            }}
+            className="h-full rounded-full transition-[width]"
+            style={{ width: `${progress * 100}%`, background: COLORS.scrubberFill }}
+          />
+          <EventMarkers
+            events={scrubberEvents}
+            totalDuration={totalDuration}
+            eventCount={scrubberEvents.length}
+            className="opacity-60 group-hover:opacity-100 transition-opacity"
           />
         </div>
 
-        {/* Duration */}
-        <span className="text-[13px] font-mono font-medium shrink-0" style={{ color: COLORS.textMuted }}>
-          {formatTime(totalDuration)}
-        </span>
+        {/* Playhead */}
+        <div
+          className="absolute top-1/2 -translate-y-1/2 rounded-full transition-all duration-150"
+          style={{
+            left: `${progress * 100}%`,
+            width: isScrubbing ? 14 : 11,
+            height: isScrubbing ? 14 : 11,
+            marginLeft: isScrubbing ? -7 : -5.5,
+            background: COLORS.textPrimary,
+            boxShadow: COLORS.scrubberHeadGlow,
+          }}
+        />
+      </div>
 
-        {/* Speed controls */}
-        <div className="flex items-center gap-1 shrink-0">
+      <span className="ui-xs ui-num shrink-0" style={{ color: COLORS.textMuted }}>
+        {formatTime(totalDuration)}
+      </span>
+
+      {/* Speed — the first thing to go when the surface can't hold the row. */}
+      {!narrow && (
+        <div
+          role="group"
+          aria-label="Playback speed"
+          className="flex items-center shrink-0"
+          style={{ padding: 2, borderRadius: 8, background: COLORS.holoBg03 }}
+        >
           {SPEEDS.map((s) => (
             <button
               key={s}
               onClick={() => onSpeedChange(s)}
-              className="px-2.5 py-1 rounded text-[13px] font-mono font-medium transition-all"
+              aria-pressed={speed === s}
+              title={`${s}× playback speed`}
+              className="ui-2xs ui-num transition-colors"
               style={{
+                height: 20,
+                paddingInline: 6,
+                borderRadius: 6,
                 background: speed === s ? COLORS.playBtnActiveBg : 'transparent',
                 color: speed === s ? COLORS.textPrimary : COLORS.textMuted,
+                fontWeight: speed === s ? 600 : 500,
               }}
             >
               {s}x
             </button>
           ))}
         </div>
+      )}
 
-        {/* Resume Live */}
-        {isReviewing && (
-          <button
+      {isReviewing && (
+        <>
+          <ChromeButton
+            size="sm"
+            icon="play"
+            iconOnly={compact}
             onClick={onResumeLive}
-            className="px-3.5 py-1.5 rounded text-[13px] font-mono font-semibold transition-all hover:scale-105 shrink-0"
-            style={{
-              background: COLORS.liveResumeBg,
-              border: `1px solid ${COLORS.liveResumeBorder}`,
-              color: COLORS.liveText,
-            }}
+            aria-label="Return to live"
+            title="Leave replay and return to the live session"
+            style={{ background: COLORS.liveResumeBg, borderColor: COLORS.liveResumeBorder, color: COLORS.liveText }}
           >
-            ▶ LIVE
-          </button>
-        )}
-
-        {/* Restart */}
-        {isReviewing && (
-          <button
-            onClick={onRestart}
-            className="text-base transition-all shrink-0 hover:scale-110"
-            style={{ color: COLORS.textDim }}
-          >
-            ⟲
-          </button>
-        )}
-      </div>
-    </div>
+            Live
+          </ChromeButton>
+          <ChromeButton size="sm" icon="restart" iconOnly onClick={onRestart} aria-label="Restart from the beginning" title="Restart from the beginning" />
+        </>
+      )}
+    </BarShell>
   )
 }

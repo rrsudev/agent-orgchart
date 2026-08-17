@@ -21,6 +21,8 @@ import {
 } from './canvas/index'
 import { useCanvasCamera } from '@/hooks/use-canvas-camera'
 import { useCanvasInteraction } from '@/hooks/use-canvas-interaction'
+import { useLayout } from '@/lib/layout'
+import { railAnchor } from './side-rail'
 
 /** Respect the OS "reduce motion" setting — freezes non-essential canvas drift
  *  (parallax depth particles). Evaluated once at module load; guarded for SSR
@@ -78,6 +80,11 @@ export function AgentCanvas({
   const containerRef = useRef<HTMLDivElement>(null)
   const mainCanvasRef = useRef<HTMLCanvasElement>(null)
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 })
+  // Mirrored into a ref because the draw loop runs outside React's render and
+  // would otherwise close over the layout from the frame it was created in.
+  const layout = useLayout()
+  const layoutRef = useRef(layout)
+  layoutRef.current = layout
   const animationRef = useRef<number>(0)
   const timeRef = useRef(0)
   const simTimeRef = useRef(0)
@@ -307,7 +314,9 @@ export function AgentCanvas({
 
       if (selectedAgentId) {
         const agent = agents.get(selectedAgentId)
-        if (agent) drawTetherLine(ctx, agent, transform, h)
+        // The detail card lives at the head of the right rail, so the tether
+        // is drawn to that rail's anchor rather than to a hardcoded corner.
+        if (agent) drawTetherLine(ctx, agent, transform, railAnchor(layoutRef.current, 'right'))
       }
 
       ctx.restore()

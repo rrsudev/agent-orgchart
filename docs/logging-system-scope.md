@@ -19,7 +19,7 @@ This document has three parts, matching the ask:
 
 ### 1.1 The app does not create logs — Claude Code / Codex do
 
-Agent Flow is a **read‑only visualizer**. It never writes transcripts. The JSONL
+Agent Fruitstand is a **read‑only visualizer**. It never writes transcripts. The JSONL
 files are session transcripts produced by the agent runtimes themselves:
 
 | Runtime | Location on disk | Notes |
@@ -34,7 +34,7 @@ per session — transcripts are large and grow append‑only during a session.
 
 ### 1.2 Two ingestion sources, one normalized model
 
-Agent Flow ingests activity through **two parallel sources** that both emit the
+Agent Fruitstand ingests activity through **two parallel sources** that both emit the
 same normalized `AgentEvent` envelope, then de‑dupes them:
 
 - **Source A — Claude Code hooks** (zero latency, coarse names): a command hook
@@ -370,7 +370,7 @@ Design points:
 
 ### 3.8 Transfer / "zip & send" workflow
 
-- A command **"Agent Flow: Package Study Data"** produces
+- A command **"Agent Fruitstand: Package Study Data"** produces
   `study-storage-<participant>-<date>.zip` from the folder.
 - `README.md` inside the folder tells the participant exactly what to send and to
   whom, and tells the researcher how to load `study.sqlite` (a two‑line

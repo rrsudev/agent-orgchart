@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.0
+
+- **Rebrand to Agent Fruitstand** — all user-facing product text (panel, commands, web app title, setup/CLI output, docs) now reads "Agent Fruitstand". Internal identifiers are intentionally unchanged (command IDs, configuration keys under `agentFlowStudy.*`, and the `~/.agent-flow-study` capture folder) so existing participant settings, keybindings, hook configs, and already-captured session data keep working.
+
 ## 0.9.1
 
 - Fix: Claude Code session discovery on Windows — workspace-to-project-dir matching is now case-insensitive on win32 (#57, part of #4)

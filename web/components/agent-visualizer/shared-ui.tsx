@@ -5,7 +5,9 @@ import { Z } from '@/lib/agent-types'
 import { COLORS } from '@/lib/colors'
 import { useClickOutside } from '@/hooks/use-click-outside'
 import { clampPopupPosition } from '@/lib/clamp-popup-position'
+import { useLayout } from '@/lib/layout'
 import { GlassCard } from './glass-card'
+import { ChromeButton } from './chrome'
 
 // ─── Stop Propagation Handlers ──────────────────────────────────────────────
 // Prevents canvas drag/click events from firing when interacting with panels
@@ -24,14 +26,20 @@ interface CloseButtonProps {
 }
 
 export function CloseButton({ onClick, className = '' }: CloseButtonProps) {
+  // A line glyph rather than the "✕" character: the emoji-adjacent codepoint
+  // rendered at a different size and weight on every platform, so the dismiss
+  // affordance never matched the controls beside it.
   return (
-    <button
+    <ChromeButton
       onClick={onClick}
-      className={`text-xs transition-colors ${className}`}
-      style={{ color: COLORS.textMuted }}
-    >
-      ✕
-    </button>
+      tone="ghost"
+      size="sm"
+      icon="close"
+      iconOnly
+      aria-label="Close"
+      title="Close"
+      className={className}
+    />
   )
 }
 
@@ -69,9 +77,32 @@ interface DetailPopupProps {
   children: ReactNode
 }
 
+/** Padding `.glass-card` applies on each side — subtracted when working out how
+ *  much room the popup body actually has. */
+const CARD_PADDING = 12
+
 export function DetailPopup({ position, width, estimatedHeight, onClose, children }: DetailPopupProps) {
   const ref = useRef<HTMLDivElement>(null)
-  const { left, top } = clampPopupPosition(position, width, estimatedHeight)
+  const layout = useLayout()
+
+  // Popups are absolutely positioned inside the visualizer root, so they clamp
+  // against the measured surface and the rails — not the window, which inside a
+  // webview is a different (larger) box and let popups sit under the top bar or
+  // behind the bottom dock.
+  const w = layout.panelWidth(width)
+  const { left, top } = clampPopupPosition(position, w, estimatedHeight, 20, {
+    width: layout.width,
+    height: layout.height,
+    margin: layout.gutter,
+    insetTop: layout.railTop,
+    insetBottom: layout.railBottom,
+  })
+
+  // `estimatedHeight` is only a positioning hint — real content is routinely
+  // taller. Whatever room is left below the clamped top is the hard ceiling, so
+  // an overlong tool result scrolls inside the card instead of running off the
+  // bottom of the surface.
+  const maxBodyH = Math.max(96, layout.height - top - layout.railBottom - CARD_PADDING * 2)
 
   useClickOutside(ref, onClose)
 
@@ -79,10 +110,12 @@ export function DetailPopup({ position, width, estimatedHeight, onClose, childre
     <div
       ref={ref}
       {...stopPropagationHandlers}
-      style={{ position: 'absolute', left, top, width, zIndex: Z.detailCard }}
+      style={{ position: 'absolute', left, top, width: w, zIndex: Z.detailCard }}
     >
       <GlassCard visible={true}>
-        {children}
+        <div className="panel-scroll" style={{ maxHeight: maxBodyH }}>
+          {children}
+        </div>
       </GlassCard>
     </div>
   )

@@ -1,15 +1,14 @@
 'use client'
 
-import { useState } from 'react'
-import { Z, type AgentState } from '@/lib/agent-types'
+import { type AgentState } from '@/lib/agent-types'
 import { COLORS, getStateColor } from '@/lib/colors'
-import { GlassCard } from './glass-card'
-import { PanelHeader, SlidingPanel, stopPropagationHandlers } from './shared-ui'
+import { useLayout } from '@/lib/layout'
+import { ChromeButton } from './chrome'
+import { PanelHeader, stopPropagationHandlers } from './shared-ui'
 
 interface LegendPanelProps {
   visible: boolean
   onClose: () => void
-  onOpen: () => void
 }
 
 /** SF-Symbols-style white line glyph — mirrors the canvas state badge so the
@@ -71,126 +70,89 @@ function Row({ children }: { children: React.ReactNode }) {
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="text-[11px] font-semibold mt-2 mb-1" style={{ color: COLORS.panelLabel, letterSpacing: '-0.01em' }}>
+    <div className="ui-xs font-semibold mt-2 mb-1" style={{ color: COLORS.panelLabel, letterSpacing: '-0.01em' }}>
       {children}
     </div>
   )
 }
 
-export function LegendPanel({ visible, onClose, onOpen }: LegendPanelProps) {
-  const [collapsed, setCollapsed] = useState(false)
+/** The dock button that opens the legend. Lives in the bottom dock's left slot
+ *  rather than positioning itself, so it can never land on top of the timer. */
+export function LegendLauncher({ onOpen, active }: { onOpen: () => void; active: boolean }) {
+  const { narrow } = useLayout()
+  return (
+    <ChromeButton
+      icon="info"
+      onClick={onOpen}
+      iconOnly={narrow}
+      aria-label="Show legend"
+      aria-expanded={active}
+      title="Show the legend — what each node shape, color, and edge means"
+      style={{ visibility: active ? 'hidden' : 'visible' }}
+    >
+      Legend
+    </ChromeButton>
+  )
+}
+
+/**
+ * The legend itself. It sits at the foot of the left rail, which owns placement
+ * and shrinks the card when the file panel above it is also open — the old
+ * version pinned itself to the bottom-left corner at its natural height and, on
+ * a short surface, ran straight up over whatever was above it.
+ */
+export function LegendPanel({ visible, onClose }: LegendPanelProps) {
+  const layout = useLayout()
+  if (!visible) return null
 
   return (
-    <>
-      {/* Persistent launcher — lets the user re-open the legend after closing it. */}
-      <div
-        {...stopPropagationHandlers}
-        className="absolute transition-opacity duration-200"
-        style={{
-          left: 12,
-          bottom: 12,
-          zIndex: Z.sidePanel,
-          opacity: visible ? 0 : 1,
-          pointerEvents: visible ? 'none' : 'auto',
-        }}
-      >
-        <GlassCard visible={!visible} style={{ padding: 0 }}>
-          <button
-            onClick={onOpen}
-            aria-label="Show legend"
-            className="flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-semibold transition-colors"
-            style={{ color: COLORS.textPrimary, letterSpacing: '-0.01em' }}
-          >
-            <span aria-hidden="true">ⓘ</span>
+    <div
+      {...stopPropagationHandlers}
+      className="flex flex-col min-h-0"
+      style={{ maxHeight: layout.panelHeight() }}
+    >
+      <div className="glass-card is-dense flex flex-col min-h-0">
+        <PanelHeader onClose={onClose}>
+          <span className="ui-sm font-semibold" style={{ color: COLORS.textPrimary, letterSpacing: '-0.01em' }}>
             Legend
-          </button>
-        </GlassCard>
-      </div>
+          </span>
+        </PanelHeader>
 
-      <SlidingPanel
-        visible={visible}
-        position={{ left: 12, bottom: 12 }}
-        axis="Y"
-        offset={24}
-        zIndex={Z.sidePanel}
-        width={collapsed ? 'auto' : 224}
-        className="max-w-[240px]"
-      >
-      <div {...stopPropagationHandlers}>
-        {collapsed ? (
-          // Collapsed → compact, unobtrusive pill that expands on click.
-          <GlassCard visible={true} style={{ padding: 0 }}>
-            <button
-              onClick={() => setCollapsed(false)}
-              aria-expanded={false}
-              aria-label="Expand legend"
-              className="flex items-center gap-1.5 px-3 py-1.5 text-[13px] font-semibold transition-colors"
-              style={{ color: COLORS.textPrimary, letterSpacing: '-0.01em' }}
-            >
-              <span aria-hidden="true">ⓘ</span>
-              Legend
-              <span aria-hidden="true" style={{ color: COLORS.textMuted }}>▸</span>
-            </button>
-          </GlassCard>
-        ) : (
-          <GlassCard visible={true}>
-            <PanelHeader
-              onClose={onClose}
-              actions={
-                <button
-                  onClick={() => setCollapsed(true)}
-                  aria-expanded={true}
-                  aria-label="Collapse legend"
-                  className="text-xs px-1 transition-colors"
-                  style={{ color: COLORS.textMuted }}
-                >
-                  ▾
-                </button>
-              }
-            >
-              <span className="text-[13px] font-semibold" style={{ color: COLORS.textPrimary, letterSpacing: '-0.01em' }}>
-                Legend
+        <div className="panel-scroll min-h-0 ui-xs" style={{ color: COLORS.textDim }}>
+          <SectionLabel>Agent state</SectionLabel>
+          {STATES.map(({ state, label, shape }) => (
+            <Row key={state}>
+              <StateChip state={state} />
+              <span className="flex-1 min-w-0" style={{ color: COLORS.textPrimary }}>{label}</span>
+              <span className="ui-2xs shrink-0" style={{ color: COLORS.textMuted }}>{shape}</span>
+            </Row>
+          ))}
+
+          <SectionLabel>Node</SectionLabel>
+          <Row>
+            <span className="inline-flex shrink-0 items-center justify-center" style={{ width: 18, height: 18 }}>
+              <span style={{ width: 15, height: 15, borderRadius: 6, background: '#fff', border: `1.25px solid ${COLORS.idle}` }} />
+            </span>
+            <span style={{ color: COLORS.textPrimary }}>Main agent (square, branded)</span>
+          </Row>
+          <Row>
+            <span className="inline-flex shrink-0 items-center justify-center" style={{ width: 18, height: 18 }}>
+              <span style={{ width: 12, height: 12, borderRadius: '50%', background: '#fff', border: `1.25px solid ${COLORS.idle}` }} />
+            </span>
+            <span style={{ color: COLORS.textPrimary }}>Sub-agent (round, color-coded)</span>
+          </Row>
+
+          <SectionLabel>Connections</SectionLabel>
+          {EDGES.map(({ color, label }) => (
+            <Row key={label}>
+              <span className="inline-flex shrink-0 items-center justify-center" style={{ width: 18, height: 18 }}>
+                <span style={{ width: 16, height: 0, borderTop: `2px solid ${color}`, borderRadius: 2 }} />
               </span>
-            </PanelHeader>
-
-            <div className="text-[12px]" style={{ color: COLORS.textDim }}>
-              <SectionLabel>Agent state</SectionLabel>
-              {STATES.map(({ state, label, shape }) => (
-                <Row key={state}>
-                  <StateChip state={state} />
-                  <span className="flex-1 min-w-0" style={{ color: COLORS.textPrimary }}>{label}</span>
-                  <span className="text-[11px]" style={{ color: COLORS.textMuted }}>{shape}</span>
-                </Row>
-              ))}
-
-              <SectionLabel>Node</SectionLabel>
-              <Row>
-                <span className="inline-flex shrink-0 items-center justify-center" style={{ width: 18, height: 18 }}>
-                  <span style={{ width: 15, height: 15, borderRadius: 6, background: '#fff', border: `1.25px solid ${COLORS.idle}` }} />
-                </span>
-                <span style={{ color: COLORS.textPrimary }}>Main agent (square, branded)</span>
-              </Row>
-              <Row>
-                <span className="inline-flex shrink-0 items-center justify-center" style={{ width: 18, height: 18 }}>
-                  <span style={{ width: 12, height: 12, borderRadius: '50%', background: '#fff', border: `1.25px solid ${COLORS.idle}` }} />
-                </span>
-                <span style={{ color: COLORS.textPrimary }}>Sub-agent (round, color-coded)</span>
-              </Row>
-
-              <SectionLabel>Connections</SectionLabel>
-              {EDGES.map(({ color, label }) => (
-                <Row key={label}>
-                  <span className="inline-flex shrink-0 items-center justify-center" style={{ width: 18, height: 18 }}>
-                    <span style={{ width: 16, height: 0, borderTop: `2px solid ${color}`, borderRadius: 2 }} />
-                  </span>
-                  <span style={{ color: COLORS.textPrimary }}>{label}</span>
-                </Row>
-              ))}
-            </div>
-          </GlassCard>
-        )}
+              <span style={{ color: COLORS.textPrimary }}>{label}</span>
+            </Row>
+          ))}
+        </div>
       </div>
-    </SlidingPanel>
-    </>
+    </div>
   )
 }

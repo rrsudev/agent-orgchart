@@ -4,6 +4,7 @@ import { POPUP } from '@/lib/agent-types'
 import { COLORS } from '@/lib/colors'
 import { ToolContentRenderer } from './tool-content-renderer'
 import { PanelHeader, DetailPopup } from './shared-ui'
+import { StatusDot } from './chrome'
 
 interface ToolDetailPopupProps {
   tool: {
@@ -25,13 +26,15 @@ export function ToolDetailPopup({ tool, position, onClose }: ToolDetailPopupProp
   return (
     <DetailPopup position={position} width={POPUP.tool.width} estimatedHeight={POPUP.tool.estimatedHeight} onClose={onClose}>
       <PanelHeader onClose={onClose}>
-        <span className="text-[9px]" style={{ color: stateColor }}>
-          {tool.state === 'running' ? '⚙' : '✓'}
-        </span>
-        <span className="text-[11px] font-mono font-semibold" style={{ color: COLORS.tool_calling }}>
+        {/* A status dot rather than a ⚙/✓ glyph: those two codepoints rendered at
+            different sizes (and, on some platforms, in their own colors), so the
+            header baseline shifted between a running and a finished tool. The dot
+            is the same state vocabulary the LIVE/idle indicators use. */}
+        <StatusDot color={stateColor} pulse={tool.state === 'running'} size={6} />
+        <span className="ui-xs font-semibold truncate" style={{ color: COLORS.tool_calling }}>
           {tool.toolName}
         </span>
-        <span className="text-[9px] font-mono capitalize" style={{ color: stateColor + '90' }}>
+        <span className="ui-2xs capitalize shrink-0" style={{ color: stateColor + '90' }}>
           {tool.state}
         </span>
       </PanelHeader>
@@ -45,7 +48,7 @@ export function ToolDetailPopup({ tool, position, onClose }: ToolDetailPopupProp
           compact={false}
         />
       ) : (
-        <div className="text-[10px] font-mono" style={{ color: COLORS.textPrimary + '90' }}>
+        <div className="ui-xs break-words" style={{ color: COLORS.textPrimary + '90' }}>
           {tool.args}
         </div>
       )}
@@ -53,7 +56,7 @@ export function ToolDetailPopup({ tool, position, onClose }: ToolDetailPopupProp
       {/* Result */}
       {tool.result && (
         <div
-          className="mt-2 rounded px-2 py-1 text-[9px] font-mono"
+          className="mt-2 rounded px-2 py-1 ui-2xs break-words"
           style={{
             background: COLORS.resultBg,
             border: `1px solid ${COLORS.resultBorder}`,
@@ -67,7 +70,7 @@ export function ToolDetailPopup({ tool, position, onClose }: ToolDetailPopupProp
 
       {/* Token cost */}
       {tool.tokenCost != null && tool.tokenCost > 0 && (
-        <div className="mt-1.5 text-[9px] font-mono" style={{ color: COLORS.textMuted }}>
+        <div className="mt-1.5 ui-2xs ui-num" style={{ color: COLORS.textMuted }}>
           {tool.tokenCost} tokens
         </div>
       )}

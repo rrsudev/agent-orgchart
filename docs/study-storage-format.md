@@ -1,6 +1,6 @@
 # `study-storage/` — data format & transfer spec
 
-This is the on‑disk format for Agent Flow's research capture. A copy of this file
+This is the on‑disk format for Agent Fruitstand's research capture. A copy of this file
 (as `README.md`) ships **inside** the `study-storage/` folder so that whoever
 receives a zipped copy can interpret it with no other context.
 
@@ -206,7 +206,7 @@ To separate real‑time from historical data, filter on `source`
 `transcript.jsonl` is the complete record; each line is one JSON object.
 `study.sqlite` is derived from these and safe to regenerate.
 
-**Replay in the visualizer:** point Agent Flow at a session folder to reconstruct
+**Replay in the visualizer:** point Agent Fruitstand at a session folder to reconstruct
 the node‑graph from `transcript.jsonl` (+ `subagents/`, `tool-results/`).
 
 ---
@@ -215,15 +215,15 @@ the node‑graph from `transcript.jsonl` (+ `subagents/`, `tool-results/`).
 
 **Enable capture (one time):** set `agentVisualizer.studyStorage.enabled` to `true`
 in VS Code settings (and optionally `agentVisualizer.studyStorage.participantId`).
-The first time Agent Flow runs after that, it shows a consent dialog explaining
+The first time Agent Fruitstand runs after that, it shows a consent dialog explaining
 what is captured; capture only starts once you choose **Enable capture**. Consent
 is remembered per workspace. Nothing is ever uploaded automatically.
 
 **Send your data:**
 
-1. In VS Code, run **"Agent Flow: Package Study Data (Zip)"** from the Command
+1. In VS Code, run **"Agent Fruitstand: Package Study Data (Zip)"** from the Command
    Palette — it rebuilds the index and produces a `study-storage.zip`. (Or run
-   **"Agent Flow: Reveal Study Data Folder"** and compress it yourself.)
+   **"Agent Fruitstand: Reveal Study Data Folder"** and compress it yourself.)
 2. Send the zip to the researcher via the channel they gave you.
 
 **Note:** this folder contains the full content of your agent sessions —

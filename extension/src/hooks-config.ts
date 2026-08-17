@@ -26,7 +26,7 @@ function readGlobalSettings(): Record<string, unknown> | null {
   }
 }
 
-/** Check whether a single hook entry belongs to Agent Flow */
+/** Check whether a single hook entry belongs to Agent Fruitstand */
 function isAgentFlowHook(entry: ClaudeHookEntry): boolean {
   return !!entry.hooks?.some(h =>
     // Normalize backslashes to forward slashes so Windows paths

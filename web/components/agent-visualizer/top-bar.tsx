@@ -1,73 +1,39 @@
 "use client"
 
-import { memo, useEffect, useRef, useState } from "react"
+import { memo, useEffect, useRef, useState, type ReactNode } from "react"
 import { Z } from "@/lib/agent-types"
 import { COLORS } from "@/lib/colors"
 import { SessionTabs } from "./session-tabs"
+import { BarDivider, ChromeButton, ControlGroup, Icon, StatusDot, ToggleChip, type IconName } from "./chrome"
 import type { SessionInfo, ConnectionStatus } from "@/lib/bridge-types"
 import type { SessionName } from "@/lib/callsigns"
 import { useLayout } from "@/lib/layout"
 
-// ─── Toggle Button ──────────────────────────────────────────────────────────
-// A segmented on/off switch. The state is legible three ways at once: a leading
-// status dot (filled + glow when on, hollow ring when off — echoing the app's
-// LIVE/idle dots), an accent fill + bold label when on, and `role="switch"` so
-// screen readers announce it as a toggle rather than a plain button.
+// ─── Dismissable menu ───────────────────────────────────────────────────────
+// Shared by the closed-tabs list and the narrow-surface overflow menu: opens on
+// click, dismisses on outside click or Escape, and clamps its own height to the
+// surface so a long list can never run off the bottom.
 
-function ToggleButton({ active, onClick, children, label, activeColor }: {
-  active: boolean
+interface MenuTriggerProps {
   onClick: () => void
-  children: React.ReactNode
-  /** Human name of what this toggles, for the tooltip + screen-reader label. */
-  label: string
-  activeColor?: { bg: string; text: string }
-}) {
-  const accent = activeColor?.text ?? COLORS.holoBright
-  return (
-    <button
-      onClick={onClick}
-      role="switch"
-      aria-checked={active}
-      aria-label={label}
-      title={`${label}: ${active ? 'on' : 'off'} — click to ${active ? 'hide' : 'show'}`}
-      className="flex items-center gap-1.5 px-2.5 py-1 rounded transition-all"
-      style={{
-        background: active ? (activeColor?.bg ?? COLORS.toggleActive) : 'transparent',
-        color: active ? accent : COLORS.textMuted,
-        fontWeight: active ? 600 : undefined,
-      }}
-    >
-      <span
-        aria-hidden="true"
-        className="inline-block rounded-full transition-all"
-        style={{
-          width: 7,
-          height: 7,
-          background: active ? accent : 'transparent',
-          border: `1.5px solid ${active ? accent : COLORS.textMuted}`,
-          boxShadow: active ? `0 0 6px ${accent}` : 'none',
-        }}
-      />
-      {children}
-    </button>
-  )
+  'aria-haspopup': 'menu'
+  'aria-expanded': boolean
+  'aria-label': string
+  title: string
 }
 
-// ─── Closed-tabs menu ─────────────────────────────────────────────────────────
-// Lists every archived (closed) session so any one can be reopened directly —
-// selection, not a LIFO undo. Newest-closed first.
-
-function ClosedTabsMenu({ archived, display, onReopen, onResume }: {
-  archived: SessionInfo[]
-  display: Map<string, SessionName>
-  onReopen: (id: string) => void
-  /** Reopen the underlying Claude chat in a terminal. Only set inside VS Code. */
-  onResume?: (id: string) => void
+function MenuSurface({ trigger, label, children, align = 'right' }: {
+  /** Renders the button. Spread the supplied props onto it so the menu keeps
+   *  its open/close wiring and announces itself correctly. */
+  trigger: (props: MenuTriggerProps, open: boolean) => ReactNode
+  label: string
+  children: (close: () => void) => ReactNode
+  align?: 'left' | 'right'
 }) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
+  const layout = useLayout()
 
-  // Dismiss on outside click / Escape.
   useEffect(() => {
     if (!open) return
     const onDown = (e: MouseEvent) => {
@@ -82,76 +48,97 @@ function ClosedTabsMenu({ archived, display, onReopen, onResume }: {
     }
   }, [open])
 
-  if (archived.length === 0) return null
-  // Newest-closed first (archive is stored oldest→newest).
-  const items = [...archived].reverse()
-
   return (
-    <div ref={rootRef} className="relative">
-      <button
-        onClick={() => setOpen(o => !o)}
-        className="px-2.5 py-1 rounded transition-all flex items-center gap-1.5"
-        style={{
-          background: COLORS.toggleInactive,
-          border: `1px solid ${COLORS.toggleBorder}`,
-          color: COLORS.textDim,
-        }}
-        title="Reopen a closed tab"
-      >
-        <span aria-hidden="true">⤺</span>
-        Closed ({archived.length})
-      </button>
+    <div ref={rootRef} className="relative shrink-0">
+      {trigger({
+        onClick: () => setOpen(o => !o),
+        'aria-haspopup': 'menu',
+        'aria-expanded': open,
+        'aria-label': label,
+        title: label,
+      }, open)}
       {open && (
         <div
-          className="glass-card absolute right-0 mt-1.5 p-1 flex flex-col gap-0.5"
-          style={{ minWidth: 180, maxWidth: 260, maxHeight: 320, overflowY: 'auto', zIndex: Z.contextMenu }}
+          role="menu"
+          className="glass-card is-dense absolute mt-1.5 flex flex-col gap-0.5 panel-scroll"
+          style={{
+            [align]: 0,
+            minWidth: 190,
+            maxWidth: Math.min(280, layout.width - layout.gutter * 2),
+            maxHeight: layout.panelHeight(0, 0),
+            zIndex: Z.contextMenu,
+            padding: 4,
+          }}
         >
-          {items.map(s => {
-            const disp = display.get(s.id) ?? { name: s.label }
-            return (
-            <div key={s.id} className="flex items-center gap-0.5">
-              <button
-                onClick={() => { onReopen(s.id); setOpen(false) }}
-                className="flex-1 min-w-0 px-2.5 py-1.5 rounded text-left transition-colors hover:bg-black/5 truncate"
-                style={{ color: COLORS.textDim }}
-                title={disp.goal ? `Reopen "${disp.name}" — ${disp.goal}` : `Reopen "${disp.name}"`}
-              >
-                {disp.name}
-              </button>
-              {onResume && (
-                <button
-                  onClick={() => { onResume(s.id); setOpen(false) }}
-                  className="shrink-0 px-1.5 py-1.5 rounded transition-colors hover:bg-black/5"
-                  style={{ color: COLORS.textMuted }}
-                  aria-label={`Resume "${disp.name}" in a terminal`}
-                  title="Resume this chat in a terminal (claude --resume)"
-                >
-                  <span aria-hidden="true" className="text-[11px]">▷_</span>
-                </button>
-              )}
-            </div>
-          )})}
+          {children(() => setOpen(false))}
         </div>
       )}
     </div>
   )
 }
 
-// ─── Connection Status Indicator ────────────────────────────────────────────
+/** One row in a MenuSurface. */
+function MenuItem({ icon, children, onClick, title, trailing }: {
+  icon?: IconName
+  children: ReactNode
+  onClick: () => void
+  title?: string
+  trailing?: ReactNode
+}) {
+  return (
+    <div className="flex items-center gap-0.5">
+      <button
+        role="menuitem"
+        onClick={onClick}
+        title={title}
+        className="flex-1 min-w-0 flex items-center gap-2 px-2 py-1.5 rounded text-left transition-colors hover:bg-black/5 ui-sm"
+        style={{ color: COLORS.textDim }}
+      >
+        {icon && <Icon name={icon} />}
+        <span className="min-w-0 truncate">{children}</span>
+      </button>
+      {trailing}
+    </div>
+  )
+}
 
-function ConnectionIndicator({ status }: { status: ConnectionStatus }) {
+function MenuSectionLabel({ children }: { children: ReactNode }) {
+  return (
+    <div
+      className="px-2 pt-1.5 pb-1 ui-2xs uppercase tracking-wide"
+      style={{ color: COLORS.textMuted, borderTop: `1px solid ${COLORS.holoBorder06}` }}
+    >
+      {children}
+    </div>
+  )
+}
+
+/** Rough width one tab wants before it starts compressing, and the pinned
+ *  "All agents" segment beside them. Used only to budget the bar — the strip
+ *  itself lays out for real. Past six tabs the strip is expected to scroll, so
+ *  budgeting more would starve the controls for no gain. */
+const TAB_BUDGET_W = 96
+const PARALLEL_SEGMENT_W = 130
+const MAX_TABS_BUDGETED = 6
+
+// ─── Connection status ──────────────────────────────────────────────────────
+
+function ConnectionIndicator({ status, showLabel }: { status: ConnectionStatus; showLabel: boolean }) {
   const color = status === 'watching' ? COLORS.complete
     : status === 'connected' ? COLORS.idle : COLORS.error
   const label = status === 'watching' ? 'LIVE'
     : status === 'connected' ? 'CONNECTED' : 'OFFLINE'
 
   return (
-    <span className="flex items-center gap-1.5">
-      <span
-        className="w-2 h-2 rounded-full"
-        style={{ background: color, boxShadow: `0 0 6px ${color}` }}
-      />
-      {label}
+    <span
+      className="flex items-center gap-1.5 shrink-0 ui-sm"
+      // The dot alone carries the state on narrow surfaces, so the accessible
+      // name has to say what the dot means.
+      title={`Connection: ${label.toLowerCase()}`}
+      aria-label={`Connection: ${label.toLowerCase()}`}
+    >
+      <StatusDot color={color} size={7} />
+      {showLabel && label}
     </span>
   )
 }
@@ -191,8 +178,6 @@ export interface TopBarProps {
   onToggleFiles: () => void
   onToggleChat: () => void
   onToggleTokens: () => void
-  // New agent composer
-  onNewAgent: () => void
   /** Return to the study platform (opens gamejam-progress in the browser). */
   onReturnToStudy: () => void
 }
@@ -205,84 +190,188 @@ export const TopBar = memo(function TopBar({
   agentCount,
   showFileAttention, showChat, showTokens,
   onToggleFiles, onToggleChat, onToggleTokens,
-  onNewAgent,
   onReturnToStudy,
 }: TopBarProps) {
-  const { compact, narrow } = useLayout()
-  // Tighten insets + spacing as the surface narrows so the control cluster stays
-  // on one row instead of overflowing a docked VS Code column.
-  const inset = narrow ? "left-2 right-2" : compact ? "left-3 right-3" : "left-4 right-4"
-  const gap = narrow ? "gap-2" : compact ? "gap-3" : "gap-5"
-  return (
-    <div className={`absolute top-4 ${inset} flex items-center ${gap} font-mono text-[14px] font-medium`} style={{ zIndex: Z.info }}>
-      {/* Session tabs — scrollable, takes available space */}
-      {sessions.length > 1 && (
-        <div className="min-w-0 flex-shrink">
-          <SessionTabs
-            sessions={sessions}
-            sessionDisplay={sessionDisplay}
-            selectedSessionId={selectedSessionId}
-            sessionsWithActivity={sessionsWithActivity}
-            accentColors={accentColors}
-            onSelectSession={onSelectSession}
-            onCloseSession={onCloseSession}
-            onRenameSession={onRenameSession}
-            onReorderSession={onReorderSession}
-          />
-        </div>
+  const layout = useLayout()
+  const { narrow, compact, gutter, registerChrome } = layout
+
+  // What survives at each width. The bar never scrolls and never wraps; instead
+  // controls shed their decoration, then their labels, then fold into the
+  // overflow menu — so the row has a hard lower bound (~200px) well under the
+  // narrowest side bar. Anything folded away is still reachable, never dropped.
+  //
+  // Density is driven by the room left over AFTER the tabs have taken a fair
+  // share, not by the surface width alone. The tab strip is the primary
+  // navigation: with six sessions open on a 900px column, keying off width
+  // alone left the controls comfortably labelled while the tabs were crushed
+  // into a scroller. Now the controls give way first, and the tabs only scroll
+  // once they have actually run out of room.
+  const tabDemand = sessions.length > 1
+    ? PARALLEL_SEGMENT_W + Math.min(sessions.length, MAX_TABS_BUDGETED) * TAB_BUDGET_W
+    : 0
+  const controlRoom = layout.width - tabDemand
+  // Labels never go: a squeezed toggle keeps its word and trades away the status
+  // dot instead, because "Files" with an accent fill reads faster than an
+  // unlabelled glyph with a dot beside it.
+  const showToggleDots = !compact && controlRoom > 620
+  const showStatusLabel = !compact && controlRoom > 520
+  const showAgentCount = !narrow && controlRoom > 400
+  const studyIconOnly = compact || controlRoom < 660
+  const foldIntoMenu = narrow
+
+  const tabs = sessions.length > 1 && (
+    <SessionTabs
+      sessions={sessions}
+      sessionDisplay={sessionDisplay}
+      selectedSessionId={selectedSessionId}
+      sessionsWithActivity={sessionsWithActivity}
+      accentColors={accentColors}
+      onSelectSession={onSelectSession}
+      onCloseSession={onCloseSession}
+      onRenameSession={onRenameSession}
+      onReorderSession={onReorderSession}
+    />
+  )
+
+  const closedMenu = archivedSessions.length > 0 && (
+    <MenuSurface
+      label="Reopen a closed tab"
+      trigger={(props) => (
+        <ChromeButton icon="undo" {...props}>
+          {!compact && 'Closed'}
+          <span className="ui-num">{archivedSessions.length}</span>
+        </ChromeButton>
       )}
+    >
+      {(close) => (
+        // Newest-closed first (the archive is stored oldest→newest).
+        [...archivedSessions].reverse().map(s => {
+          const disp = archivedDisplay.get(s.id) ?? { name: s.label }
+          return (
+            <MenuItem
+              key={s.id}
+              onClick={() => { onReopenSession(s.id); close() }}
+              title={disp.goal ? `Reopen "${disp.name}" — ${disp.goal}` : `Reopen "${disp.name}"`}
+              trailing={onResumeSession ? (
+                <button
+                  onClick={() => { onResumeSession(s.id); close() }}
+                  className="shrink-0 p-1.5 rounded transition-colors hover:bg-black/5"
+                  style={{ color: COLORS.textMuted }}
+                  aria-label={`Resume "${disp.name}" in a terminal`}
+                  title="Resume this chat in a terminal (claude --resume)"
+                >
+                  <Icon name="terminal" />
+                </button>
+              ) : undefined}
+            >
+              {disp.name}
+            </MenuItem>
+          )
+        })
+      )}
+    </MenuSurface>
+  )
 
-      {/* Spacer pushes info to the right */}
-      <div className="flex-1" />
+  // `dots` is passed rather than read from the density flags because the same
+  // group renders in two places: squeezed into the bar, and roomy inside the
+  // overflow menu (where the dot fits again).
+  const renderToggles = (dots: boolean) => (
+    <ControlGroup label="View toggles">
+      <ToggleChip active={showFileAttention} onClick={onToggleFiles} label="File-attention panel" icon="files" showDot={dots}>Files</ToggleChip>
+      <ToggleChip active={showChat} onClick={onToggleChat} label="Conversation panel" icon="chat" showDot={dots}>Chat</ToggleChip>
+      <ToggleChip active={showTokens} onClick={onToggleTokens} label="Per-node token bar" icon="tokens" showDot={dots}>Tokens</ToggleChip>
+    </ControlGroup>
+  )
 
-      {/* Right-side info/controls */}
-      <div className={`flex items-center ${gap} flex-shrink-0`} style={{ color: COLORS.textMuted }}>
-        <ClosedTabsMenu archived={archivedSessions} display={archivedDisplay} onReopen={onReopenSession} onResume={onResumeSession} />
-        <button
-          onClick={onNewAgent}
-          className="px-2.5 py-1 rounded transition-all"
-          style={{
-            background: COLORS.toggleActive,
-            border: `1px solid ${COLORS.holoBright}`,
-            color: COLORS.holoBright,
-          }}
-          title="Compose a command to launch a new agent"
-        >
-          + New agent
-        </button>
-        {isVSCode && <ConnectionIndicator status={connectionStatus} />}
-        <span>{agentCount} agents</span>
+  return (
+    // The bar spans the surface but must not swallow clicks meant for the canvas
+    // in the empty space between its clusters — only the clusters take pointer
+    // events. `registerChrome` feeds the measured height back to the layout
+    // context so every panel's top rail follows this bar instead of a constant.
+    <div
+      ref={registerChrome('top')}
+      className="absolute top-0 left-0 right-0 flex items-center font-mono"
+      style={{
+        padding: gutter,
+        gap: narrow ? 6 : 10,
+        zIndex: Z.info,
+        pointerEvents: 'none',
+      }}
+    >
+      {/* Session tabs — take the free space and scroll internally. `min-w-0` is
+          what actually lets them shrink; without it the flex row overflows the
+          surface and the tab strip prints on top of the right-hand controls. */}
+      <div className="min-w-0 flex-1 flex items-center" style={{ pointerEvents: 'auto' }}>
+        {tabs}
+      </div>
 
-        {/* View toggles — a segmented group of on/off switches for the panels +
-            the per-node token bar. */}
-        <div
-          role="group"
-          aria-label="View toggles"
-          className="flex items-center gap-1 px-1 py-1 rounded-lg"
-          style={{
-            background: COLORS.holoBg03,
-            border: `1px solid ${COLORS.holoBorder06}`,
-          }}
-        >
-          <ToggleButton active={showFileAttention} onClick={onToggleFiles} label="File-attention panel">Files</ToggleButton>
-          <ToggleButton active={showChat} onClick={onToggleChat} label="Conversation panel">Chat</ToggleButton>
-          <ToggleButton active={showTokens} onClick={onToggleTokens} label="Per-node token bar">Tokens</ToggleButton>
-        </div>
-
-        {/* Return to the study platform — corner of the tool */}
-        <button
-          onClick={onReturnToStudy}
-          className="px-2.5 py-1 rounded transition-all flex items-center gap-1.5 hover:scale-[1.03]"
-          style={{
-            background: COLORS.holoBg05,
-            border: `1px solid ${COLORS.holoBorder10}`,
-            color: COLORS.holoBright,
-          }}
-          title="Return to the study platform (opens in your browser)"
-        >
-          <span aria-hidden="true">↗</span>
-          Study platform
-        </button>
+      {/* Right cluster — fixed content, progressively folded. */}
+      <div
+        className="flex items-center shrink-0"
+        style={{ gap: narrow ? 6 : 8, color: COLORS.textMuted, pointerEvents: 'auto' }}
+      >
+        {foldIntoMenu ? (
+          <>
+            <MenuSurface
+              label="More controls"
+              trigger={(props) => <ChromeButton icon="more" iconOnly {...props} />}
+            >
+              {(close) => (
+                <>
+                  {/* Status + count read as one summary line at the top of the
+                      menu, since neither fits in the bar at this width. */}
+                  <div className="flex items-center gap-2 px-2 py-1.5 ui-xs" style={{ color: COLORS.textMuted }}>
+                    {isVSCode && <ConnectionIndicator status={connectionStatus} showLabel />}
+                    <span className="ui-num">{agentCount} {agentCount === 1 ? 'agent' : 'agents'}</span>
+                  </div>
+                  <div className="px-2 pb-1.5">{renderToggles(true)}</div>
+                  {archivedSessions.length > 0 && (
+                    <>
+                      <MenuSectionLabel>Closed tabs</MenuSectionLabel>
+                      {[...archivedSessions].reverse().map(s => {
+                        const disp = archivedDisplay.get(s.id) ?? { name: s.label }
+                        return (
+                          <MenuItem
+                            key={s.id}
+                            icon="undo"
+                            onClick={() => { onReopenSession(s.id); close() }}
+                            title={disp.goal ? `Reopen "${disp.name}" — ${disp.goal}` : `Reopen "${disp.name}"`}
+                          >
+                            {disp.name}
+                          </MenuItem>
+                        )
+                      })}
+                    </>
+                  )}
+                  <MenuItem icon="external" onClick={() => { onReturnToStudy(); close() }} title="Return to the study platform (opens in your browser)">
+                    Study platform
+                  </MenuItem>
+                </>
+              )}
+            </MenuSurface>
+          </>
+        ) : (
+          <>
+            {closedMenu}
+            {closedMenu && <BarDivider />}
+            {isVSCode && <ConnectionIndicator status={connectionStatus} showLabel={showStatusLabel} />}
+            {showAgentCount && (
+              <span className="ui-sm ui-num shrink-0">
+                {agentCount} {agentCount === 1 ? 'agent' : 'agents'}
+              </span>
+            )}
+            {renderToggles(showToggleDots)}
+            <ChromeButton
+              icon="external"
+              onClick={onReturnToStudy}
+              title="Return to the study platform (opens in your browser)"
+              iconOnly={studyIconOnly}
+              aria-label="Study platform"
+            >
+              Study platform
+            </ChromeButton>
+          </>
+        )}
       </div>
     </div>
   )

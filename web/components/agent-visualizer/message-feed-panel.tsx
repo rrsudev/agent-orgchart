@@ -1,19 +1,25 @@
 'use client'
 
 import { useState, useRef, useMemo } from 'react'
-import { Agent, Z } from '@/lib/agent-types'
+import { Agent } from '@/lib/agent-types'
 import { COLORS, ROLE_COLORS } from '@/lib/colors'
 import type { ConversationMessage } from '@/hooks/simulation/types'
 import { useVirtualList } from '@/hooks/use-virtual-list'
 import { useAutoScroll } from '@/hooks/use-auto-scroll'
 import { TranscriptMessage } from './transcript-message'
-import { useLayout, GUTTER, RAIL_TOP } from '@/lib/layout'
+import { Icon, ChromeButton } from './chrome'
+import { useLayout } from '@/lib/layout'
 
 // Only text messages count toward the collapsed "latest message" pill.
 const TEXT_TYPES = new Set(['assistant', 'user', 'thinking'])
-const COLLAPSED_AGENT_NAME_MAX = 16
-const PREVIEW_MAX = 50
+const COLLAPSED_AGENT_NAME_MAX = 14
+const PREVIEW_MAX = 40
 const GAP = 8
+
+/** Tallest the feed may grow, so it never swallows the canvas it annotates.
+ *  A short surface (a bottom-docked panel) gets the tighter cap. */
+const MAX_H = 460
+const MAX_H_SHORT = 260
 
 type Mode = 'global' | 'active'
 
@@ -55,13 +61,13 @@ export function MessageFeedPanel({
   const agentsRef = useRef(agents)
   agentsRef.current = agents
 
-  // Responsive sizing: clamp to the measured surface so the panel never spills
-  // past a narrow VS Code webview's edges. Right-anchored below the top bar.
+  // ── Sizing ────────────────────────────────────────────────────────────────
+  // The right rail owns placement and width (see side-rail.tsx); this panel only
+  // caps its own height.
   const layout = useLayout()
-  const panelW = layout.panelWidth(340)
-  const pillW = layout.panelWidth(320)
-  const panelMaxH = Math.min(460, layout.panelHeight(RAIL_TOP + GUTTER))
-  const listMaxH = Math.max(120, panelMaxH - 84)
+  // A cap, not the budget: the rail shrinks the card further when the column is
+  // crowded, and the transcript below scrolls.
+  const panelMaxH = Math.min(layout.short ? MAX_H_SHORT : MAX_H, layout.panelHeight())
 
   const [searchQuery, setSearchQuery] = useState('')
   const [showSearch, setShowSearch] = useState(false)
@@ -139,19 +145,36 @@ export function MessageFeedPanel({
 
     return (
       <div
-        className="absolute cursor-pointer transition-all hover:scale-[1.02] flex justify-end"
-        style={{ top: 66, right: 12, zIndex: Z.info, pointerEvents: 'auto' }}
+        className="cursor-pointer transition-transform hover:scale-[1.01]"
         onClick={() => onOpenChange(true)}
+        // The pill has always been a clickable div; now that it announces itself
+        // as a button it has to be reachable and operable from the keyboard too.
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenChange(true) }
+        }}
+        aria-label="Expand the conversation panel"
+        title="Show the conversation panel"
       >
-        <div className="glass-card px-3 py-2 flex items-center gap-2" style={{ maxWidth: pillW }}>
-          <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: role.text }} />
-          <span className="text-[9px] font-mono font-semibold shrink-0" style={{ color: COLORS.textPrimary }}>
+        {/* Deliberately slighter than the expanded panel: collapsed, this is a
+            peek at the last thing said, not a reading surface — so it runs a
+            step down the type scale and on tighter padding than a `is-dense`
+            card, and sits as a thin strip at the head of the rail. */}
+        <div
+          className="glass-card flex items-center gap-2"
+          style={{ maxWidth: '100%', padding: '5px 9px' }}
+        >
+          <div className="rounded-full shrink-0" style={{ width: 5, height: 5, background: role.text }} />
+          <span className="ui-2xs font-semibold shrink-0" style={{ color: COLORS.textPrimary }}>
             {agentName.length > COLLAPSED_AGENT_NAME_MAX ? agentName.slice(0, COLLAPSED_AGENT_NAME_MAX) + '…' : agentName}
           </span>
-          <span className="text-[9px] font-mono truncate" style={{ color: role.text + 'cc' }}>
+          <span className="ui-2xs truncate" style={{ color: role.text + 'cc' }}>
             {preview}{latestMessage.content.length > PREVIEW_MAX ? '…' : ''}
           </span>
-          <span className="text-[9px] shrink-0" style={{ color: COLORS.textMuted }}>▾</span>
+          <span className="shrink-0" style={{ color: COLORS.textMuted }}>
+            <Icon name="chevronDown" size={10} />
+          </span>
         </div>
       </div>
     )
@@ -159,49 +182,61 @@ export function MessageFeedPanel({
 
   // ── Expanded: Global (transcript) / Tab (current tab's thread) ──
   return (
-    <div
-      className="absolute"
-      style={{ top: 66, right: 12, zIndex: Z.info, pointerEvents: 'auto' }}
-      onClick={(e) => e.stopPropagation()}
-    >
-      <div className="glass-card flex flex-col" style={{ width: panelW, maxHeight: panelMaxH }}>
+    // A flex COLUMN, not a row: as a row the card became a horizontally
+    // content-sized flex item, so it floated inboard and left a gap between
+    // itself and the surface edge instead of filling its rail.
+    <div className="flex flex-col min-h-0" onClick={(e) => e.stopPropagation()}>
+      {/* The card owns the height budget and the body flexes inside it, so the
+          list is whatever is left over rather than a hand-tuned subtraction. */}
+      <div className="glass-card is-dense flex flex-col min-h-0" style={{ maxHeight: panelMaxH }}>
         {/* Header: sub-tabs + (global) search + collapse */}
-        <div className="flex items-center justify-between px-2 pt-2 pb-1.5 gap-2">
-          <div className="flex gap-0.5 min-w-0">
-            <SubTab label="Global" active={mode === 'global'} onClick={() => onModeChange('global')} />
-            <SubTab
-              label="Tab"
-              active={mode === 'active'}
-              disabled={!threadAgentId}
-              onClick={() => threadAgentId && onModeChange('active')}
-            />
-          </div>
+        <div className="flex items-center justify-between pb-1.5 gap-2 shrink-0">
+          <SubTabs mode={mode} onModeChange={onModeChange} threadEnabled={!!threadAgentId} />
           <div className="flex items-center gap-1 shrink-0">
             {mode === 'global' && (
-              <button
+              <ChromeButton
                 onClick={() => { setShowSearch(s => !s); if (showSearch) setSearchQuery('') }}
-                className="text-[10px] font-mono px-1.5 py-0.5 rounded transition-all"
-                style={{ background: showSearch ? COLORS.toggleActive : 'transparent', color: showSearch ? COLORS.assistantText : COLORS.textMuted }}
+                tone={showSearch ? 'accent' : 'ghost'}
+                size="sm"
+                icon="search"
+                iconOnly
+                aria-pressed={showSearch}
+                aria-label="Search the transcript"
                 title="Search the transcript"
-              >
-                /
-              </button>
+              />
             )}
-            <button onClick={() => onOpenChange(false)} className="text-[9px] px-1 transition-colors" style={{ color: COLORS.textMuted }}>▴</button>
+            <ChromeButton
+              onClick={() => onOpenChange(false)}
+              tone="ghost"
+              size="sm"
+              aria-label="Collapse the conversation panel"
+              title="Collapse the conversation panel"
+            >
+              {/* No "chevron up" in the icon set — the down chevron flipped keeps
+                  the same stroke weight as every other glyph in the chrome. */}
+              <Icon name="chevronDown" className="rotate-180" />
+            </ChromeButton>
           </div>
         </div>
 
         {/* Global search bar */}
         {mode === 'global' && showSearch && (
-          <div className="px-2 pb-1.5" style={{ borderBottom: `1px solid ${COLORS.holoBorder06}` }}>
+          <div className="pb-1.5 shrink-0" style={{ borderBottom: `1px solid ${COLORS.holoBorder06}` }}>
             <input
               autoFocus
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Escape') { setShowSearch(false); setSearchQuery('') } e.stopPropagation() }}
               placeholder="Filter transcript…"
-              className="w-full px-2 py-1 rounded text-[10px] font-mono outline-none"
-              style={{ background: COLORS.holoBg05, border: `1px solid ${COLORS.holoBorder12}`, color: COLORS.assistantText }}
+              aria-label="Filter transcript"
+              className="w-full px-2 ui-xs outline-none"
+              style={{
+                height: 'var(--ctl-h-sm)',
+                borderRadius: 'var(--ctl-radius)',
+                background: COLORS.holoBg05,
+                border: `1px solid ${COLORS.holoBorder12}`,
+                color: COLORS.assistantText,
+              }}
             />
           </div>
         )}
@@ -211,8 +246,7 @@ export function MessageFeedPanel({
           <div
             ref={logRef}
             onScroll={handleScroll}
-            className="flex-1 overflow-y-auto px-2 py-2"
-            style={{ maxHeight: listMaxH, scrollbarWidth: 'thin', scrollbarColor: `${COLORS.scrollbarThumb} transparent` }}
+            className="panel-scroll flex-auto min-h-0 pt-2"
           >
             {sessionMessages.length === 0 ? (
               <EmptyHint text={searchQuery ? 'No matching messages' : 'Waiting for session activity…'} />
@@ -226,8 +260,9 @@ export function MessageFeedPanel({
                         {multiAgent && (
                           <button
                             onClick={() => onAgentClick(msg.agentId)}
-                            className="text-[8px] font-mono mb-0.5 px-1 rounded transition-colors hover:underline"
+                            className="ui-2xs mb-0.5 px-1 rounded transition-colors hover:underline max-w-full truncate"
                             style={{ color: COLORS.textMuted }}
+                            title={`Select ${agent?.name ?? msg.agentId}`}
                           >
                             {agent?.name ?? msg.agentId}
                           </button>
@@ -243,8 +278,7 @@ export function MessageFeedPanel({
         ) : (
           <div
             ref={activeLogRef}
-            className="flex-1 overflow-y-auto space-y-1.5 px-2 py-2"
-            style={{ maxHeight: listMaxH, scrollbarWidth: 'thin', scrollbarColor: `${COLORS.scrollbarThumb} transparent` }}
+            className="panel-scroll flex-auto min-h-0 space-y-1.5 pt-2"
           >
             {!threadAgent ? (
               <EmptyHint text="No messages yet" />
@@ -262,33 +296,80 @@ export function MessageFeedPanel({
   )
 }
 
-function SubTab({ label, active, onClick, disabled }: {
-  label: string
-  active: boolean
-  onClick: () => void
-  disabled?: boolean
+/**
+ * The Global/Tab switch, as one segmented control.
+ *
+ * The two used to be independent buttons that changed shape with their state —
+ * an accent-filled pill when selected, bare text when not, and a heavier font
+ * weight on the active one. Since "Global" and "Tab" are different lengths to
+ * begin with, every switch resized both segments and shifted the row. Here the
+ * segments share a track, hold one width, and keep one font weight; only the
+ * capsule moves. It is the same raised-white-on-grey language the session tabs
+ * above it already use, so the two tab strips read as the same control.
+ */
+const SEGMENT_MIN_W = 62
+const SEGMENT_SHADOW = '0 1px 2px rgba(0,0,0,0.14), 0 1px 4px rgba(0,0,0,0.06)'
+
+function SubTabs({ mode, onModeChange, threadEnabled }: {
+  mode: Mode
+  onModeChange: (mode: Mode) => void
+  /** The Tab view needs an agent thread to show. */
+  threadEnabled: boolean
 }) {
+  const segments: { id: Mode; label: string; title: string; disabled?: boolean }[] = [
+    { id: 'global', label: 'Global', title: 'Every agent’s messages and tool calls, merged' },
+    { id: 'active', label: 'Tab', title: 'The selected agent’s own thread', disabled: !threadEnabled },
+  ]
   return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className="px-2 py-0.5 rounded text-[10px] font-mono font-semibold tracking-wider transition-all shrink-0 max-w-[180px] truncate"
+    <div
+      role="tablist"
+      aria-label="Conversation view"
+      className="flex items-center shrink-0"
       style={{
-        background: active ? COLORS.holoBase + '20' : 'transparent',
-        color: disabled ? COLORS.textMuted + '80' : active ? COLORS.holoBase : COLORS.textMuted,
-        border: active ? `1px solid ${COLORS.holoBase}30` : '1px solid transparent',
-        cursor: disabled ? 'default' : 'pointer',
+        padding: 2,
+        borderRadius: 9,
+        background: 'rgba(0, 0, 0, 0.045)',
+        border: `1px solid ${COLORS.holoBorder08}`,
       }}
     >
-      {label.toUpperCase()}
-    </button>
+      {segments.map(({ id, label, title, disabled }) => {
+        const active = mode === id
+        return (
+          <button
+            key={id}
+            role="tab"
+            aria-selected={active}
+            disabled={disabled}
+            onClick={() => !disabled && onModeChange(id)}
+            title={title}
+            className="inline-flex items-center justify-center transition-colors"
+            style={{
+              minWidth: SEGMENT_MIN_W,
+              height: 'var(--ctl-h-sm)',
+              paddingInline: 8,
+              borderRadius: 7,
+              // Weight is constant across states — a bolder active label would
+              // resize the segment and nudge everything beside it.
+              fontSize: 'var(--ui-sm)',
+              fontWeight: 600,
+              background: active ? '#ffffff' : 'transparent',
+              boxShadow: active ? SEGMENT_SHADOW : 'none',
+              color: disabled ? COLORS.textMuted + '80' : active ? COLORS.textPrimary : COLORS.textDim,
+              cursor: disabled ? 'default' : 'pointer',
+            }}
+          >
+            {label}
+          </button>
+        )
+      })}
+    </div>
   )
 }
 
 function EmptyHint({ text }: { text: string }) {
   return (
     <div className="flex items-center justify-center py-6">
-      <span className="text-[9px] font-mono" style={{ color: COLORS.textMuted }}>{text}</span>
+      <span className="ui-xs" style={{ color: COLORS.textMuted }}>{text}</span>
     </div>
   )
 }

@@ -25,12 +25,15 @@ import { stopPropagationHandlers } from "./shared-ui"
 import { TimelineEvent, SimulationEvent, TIMING, Z } from "@/lib/agent-types"
 import { PARALLEL_VIEW_ID } from "@/lib/bridge-types"
 import { COLORS } from "@/lib/colors"
-import { LayoutProvider } from "@/lib/layout"
+import { LayoutProvider, useLayout } from "@/lib/layout"
 
 import { MessageFeedPanel } from "./message-feed-panel"
-import { LegendPanel } from "./legend-panel"
+import { LegendLauncher, LegendPanel } from "./legend-panel"
+import { BottomDock } from "./bottom-dock"
+import { RailGuard } from "./rail-guard"
+import { RailSlot, SideRail } from "./side-rail"
+import { ChromeButton, Icon } from "./chrome"
 import { TopBar } from "./top-bar"
-import { PromptComposerPanel } from "./prompt-composer-panel"
 import { useStudySession } from "@/hooks/use-study-session"
 import { SessionTimerBar } from "./session-timer-bar"
 import { StudySessionArchive } from "./study-session-archive"
@@ -58,6 +61,36 @@ function toSimReplayEvent(r: RecordedSimEvent): SimulationEvent {
     }
   }
   return { time: r.time, type: r.type as SimulationEvent['type'], payload, sessionId: r.sessionId }
+}
+
+/** Read-only replay notice. Sits on the top rail (below the bar) rather than at
+ *  a fixed `top-4`, where it used to land on top of the session tabs. */
+function ReplayBanner({ number, onExit }: { number: number; onExit: () => void }) {
+  const layout = useLayout()
+  return (
+    <div
+      className="absolute left-1/2 -translate-x-1/2 font-mono"
+      style={{ top: layout.railTop, zIndex: Z.info, pointerEvents: 'auto', maxWidth: layout.panelWidth(420) }}
+    >
+      <div className="glass-card is-dense flex items-center gap-2.5" style={{ paddingInline: 12 }}>
+        <Icon name="play" />
+        <span className="ui-sm font-semibold truncate" style={{ color: COLORS.holoBright }}>
+          Replaying session {number}
+        </span>
+        {!layout.compact && (
+          <span className="ui-xs shrink-0" style={{ color: COLORS.textMuted }}>recorded · read-only</span>
+        )}
+        <ChromeButton
+          size="sm"
+          onClick={onExit}
+          title="Leave replay and return to the live session"
+          style={{ background: COLORS.liveResumeBg, borderColor: COLORS.liveResumeBorder, color: COLORS.liveText }}
+        >
+          Exit replay
+        </ChromeButton>
+      </div>
+    </div>
+  )
 }
 
 export function AgentVisualizer() {
@@ -294,13 +327,20 @@ export function AgentVisualizer() {
   const [showHexGrid, setShowHexGrid] = useState(false)
   const [showFileAttention, setShowFileAttention] = useState(false)
   const [showLegend, setShowLegend] = useState(false)
-  const [showComposer, setShowComposer] = useState(false)
 
   // Unified conversation panel: Global (full session transcript) / Active thread.
   const [chatOpen, setChatOpen] = useState(false)
   const [chatMode, setChatMode] = useState<'global' | 'active'>('global')
   const toggleFiles = useCallback(() => setShowFileAttention(prev => !prev), [])
   const toggleChat = useCallback(() => { setChatOpen(o => !o); setChatMode('global') }, [])
+  // Stable identity so RailGuard's effect isn't re-run every render.
+  const railClosers = useMemo(() => ({
+    files: () => setShowFileAttention(false),
+    chat: () => setChatOpen(false),
+    legend: () => setShowLegend(false),
+  }), [])
+  const closeFileAttention = railClosers.files
+  const closeLegend = railClosers.legend
 
   // Selecting an agent node opens the conversation panel on that agent's thread.
   useEffect(() => {
@@ -560,24 +600,25 @@ export function AgentVisualizer() {
       },
       { separator: true },
       {
-        label: '✎  Rename',
+        label: 'Rename',
+        icon: 'pencil' as const,
         onClick: () => {
           const cm = selection.contextMenu
           if (cm?.agentId) setRenaming({ agentId: cm.agentId, x: cm.x, y: cm.y })
         },
       },
-      { label: '📊  Toggle Stats', onClick: () => setShowStats(prev => !prev) },
-      { label: '🔢  Toggle token bar', onClick: toggleTokens },
-      { label: '📝  Toggle sublabels', onClick: toggleSubtitles },
+      { label: 'Toggle stats', icon: 'stats' as const, onClick: () => setShowStats(prev => !prev) },
+      { label: 'Toggle token bar', icon: 'tokens' as const, onClick: toggleTokens },
+      { label: 'Toggle sublabels', icon: 'label' as const, onClick: toggleSubtitles },
     ] : [
-      { label: '🔍  Zoom to Fit', onClick: () => setZoomToFitTrigger(n => n + 1) },
-      { label: '📊  Toggle Stats', onClick: () => setShowStats(prev => !prev) },
-      { label: '🔢  Toggle token bar', onClick: toggleTokens },
-      { label: '📝  Toggle sublabels', onClick: toggleSubtitles },
-      { label: '⬡  Toggle Grid', onClick: () => setShowHexGrid(prev => !prev) },
-      { label: 'ⓘ  Toggle Legend', onClick: () => setShowLegend(prev => !prev) },
+      { label: 'Zoom to fit', icon: 'fit' as const, onClick: () => setZoomToFitTrigger(n => n + 1) },
+      { label: 'Toggle stats', icon: 'stats' as const, onClick: () => setShowStats(prev => !prev) },
+      { label: 'Toggle token bar', icon: 'tokens' as const, onClick: toggleTokens },
+      { label: 'Toggle sublabels', icon: 'label' as const, onClick: toggleSubtitles },
+      { label: 'Toggle grid', icon: 'grid' as const, onClick: () => setShowHexGrid(prev => !prev) },
+      { label: 'Toggle legend', icon: 'info' as const, onClick: () => setShowLegend(prev => !prev) },
       { label: '', onClick: () => {}, separator: true },
-      { label: '⟲  Restart', onClick: restart },
+      { label: 'Restart', icon: 'restart' as const, onClick: restart },
     ]
   ) : []
 
@@ -676,51 +717,70 @@ export function AgentVisualizer() {
         onAgentNameClick={(agentId, x, y) => setRenaming({ agentId, x, y })}
       />
 
-      {/* Legend (bottom-left) — documents the visual language */}
-      <LegendPanel visible={showLegend} onClose={() => setShowLegend(false)} onOpen={() => setShowLegend(true)} />
+      {/* Keeps panels off each other when the surface can't hold them all. */}
+      <RailGuard files={showFileAttention} chat={chatOpen} legend={showLegend} close={railClosers} />
 
       {/* Cursor-following full-goal / full-task tooltip on node hover. */}
       <AgentHoverTooltip text={hoverText} />
 
-      {/* Unified conversation panel (top-right): Global transcript / Active thread */}
-      <MessageFeedPanel
-        conversations={conversations}
-        agents={displayAgents}
-        onAgentClick={selection.handleAgentClick}
-        selectedAgentId={selection.selectedAgentId}
-        runtime={sessionRuntime}
-        open={chatOpen}
-        onOpenChange={setChatOpen}
-        mode={chatMode}
-        onModeChange={setChatMode}
-      />
-
-      {/* Agent detail card (floating, tethered to node) */}
-      {selectedAgent && selection.selectedAgentWorldPos && (
-        <div {...stopPropagationHandlers}>
-          <AgentDetailCard
-            agent={{
-              ...selectedAgent,
-              // Show the full task; main agents fall back to the session goal.
-              task: selectedAgent.task ?? agentSubtitles.get(selectedAgent.id),
-            }}
-            onRename={(name) => {
-              const key = agentColorKey(bridge.selectedSessionId, selectedAgent.id)
-              const previous = agentNameStore.get(key) ?? ''
-              const next = (name ?? '').trim()
-              setAgentName(key, name || null)
-              if (next !== previous) {
-                logInteraction({
-                  kind: 'agent-rename', agentId: selectedAgent.id,
-                  sessionId: bridge.selectedSessionId ?? undefined,
-                  studySessionId: study.current?.id, previous, next,
-                })
-              }
-            }}
-            onClose={selection.clearAgent}
+      {/* Left rail: what the agents are touching, and what the visuals mean. */}
+      <SideRail side="left">
+        <RailSlot>
+          <FileAttentionPanel
+            visible={showFileAttention}
+            fileAttention={fileAttention}
+            onClose={closeFileAttention}
+            onOpenFile={bridge.isVSCode ? openFile : undefined}
           />
-        </div>
-      )}
+        </RailSlot>
+        <RailSlot pin="bottom">
+          <LegendPanel visible={showLegend} onClose={closeLegend} />
+        </RailSlot>
+      </SideRail>
+
+      {/* Right rail: the selected agent, then what it has been saying. */}
+      <SideRail side="right">
+        <RailSlot>
+          {selectedAgent && selection.selectedAgentWorldPos && (
+            <div {...stopPropagationHandlers} className="flex flex-col min-h-0">
+              <AgentDetailCard
+                agent={{
+                  ...selectedAgent,
+                  // Show the full task; main agents fall back to the session goal.
+                  task: selectedAgent.task ?? agentSubtitles.get(selectedAgent.id),
+                }}
+                onRename={(name) => {
+                  const key = agentColorKey(bridge.selectedSessionId, selectedAgent.id)
+                  const previous = agentNameStore.get(key) ?? ''
+                  const next = (name ?? '').trim()
+                  setAgentName(key, name || null)
+                  if (next !== previous) {
+                    logInteraction({
+                      kind: 'agent-rename', agentId: selectedAgent.id,
+                      sessionId: bridge.selectedSessionId ?? undefined,
+                      studySessionId: study.current?.id, previous, next,
+                    })
+                  }
+                }}
+                onClose={selection.clearAgent}
+              />
+            </div>
+          )}
+        </RailSlot>
+        <RailSlot>
+          <MessageFeedPanel
+            conversations={conversations}
+            agents={displayAgents}
+            onAgentClick={selection.handleAgentClick}
+            selectedAgentId={selection.selectedAgentId}
+            runtime={sessionRuntime}
+            open={chatOpen}
+            onOpenChange={setChatOpen}
+            mode={chatMode}
+            onModeChange={setChatMode}
+          />
+        </RailSlot>
+      </SideRail>
 
       {/* Tool call detail popup */}
       {selection.selectedToolData && selection.selectedToolScreenPos && (
@@ -781,48 +841,43 @@ export function AgentVisualizer() {
         </div>
       )}
 
-      {/* Timeline scrubber — shown ONLY while replaying a recorded past session.
-          In live view the bottom holds the session timer pill instead (below). */}
-      {replaying && (
-        <ControlBar
-          isPlaying={isPlaying}
-          speed={speed}
-          currentTime={currentTime}
-          totalDuration={Math.max(maxTimeReached, currentTime)}
-          onPlayPause={handlePlayPause}
-          onRestart={() => { setIsReviewing(true); seekToTime(0) }}
-          onSpeedChange={setSpeed}
-          onSeek={(time) => {
-            pause()
-            seekToTime(time)
-            setZoomToFitTrigger(n => n + 1)
-            if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current)
-          }}
-          timelineEvents={timelineEvents}
-          isReviewing={isReviewing}
-          eventCount={timelineEvents.length}
-          onResumeLive={exitReplay}
-        />
-      )}
-
-      {/* Session timer — refined pill centered at the bottom (live view only) */}
-      {studyEnabled && study.current && !replaying && (
-        <SessionTimerBar
-          session={study.current}
-          onPause={handleSessionPauseClick}
-          onResume={study.resume}
-          onEnd={openEndConfirm}
-          onOpenArchive={openSessionArchive}
-          archiveCount={study.archive.length}
-        />
-      )}
-
-      {/* File attention panel (slide-in from right) */}
-      <FileAttentionPanel
-        visible={showFileAttention}
-        fileAttention={fileAttention}
-        onClose={() => setShowFileAttention(false)}
-        onOpenFile={bridge.isVSCode ? openFile : undefined}
+      {/* The bottom edge, as one row: the legend launcher on the left and, in
+          the center, either the replay scrubber (while replaying a recorded
+          session) or the live study-session clock. They share one slot because
+          they never coexist, and the dock reports its height so every side
+          panel's bottom rail follows it. */}
+      <BottomDock
+        left={<LegendLauncher active={showLegend} onOpen={() => setShowLegend(true)} />}
+        center={replaying ? (
+          <ControlBar
+            isPlaying={isPlaying}
+            speed={speed}
+            currentTime={currentTime}
+            totalDuration={Math.max(maxTimeReached, currentTime)}
+            onPlayPause={handlePlayPause}
+            onRestart={() => { setIsReviewing(true); seekToTime(0) }}
+            onSpeedChange={setSpeed}
+            onSeek={(time) => {
+              pause()
+              seekToTime(time)
+              setZoomToFitTrigger(n => n + 1)
+              if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current)
+            }}
+            timelineEvents={timelineEvents}
+            isReviewing={isReviewing}
+            eventCount={timelineEvents.length}
+            onResumeLive={exitReplay}
+          />
+        ) : studyEnabled && study.current ? (
+          <SessionTimerBar
+            session={study.current}
+            onPause={handleSessionPauseClick}
+            onResume={study.resume}
+            onEnd={openEndConfirm}
+            onOpenArchive={openSessionArchive}
+            archiveCount={study.archive.length}
+          />
+        ) : null}
       />
 
       {/* Top bar: session tabs + info/controls */}
@@ -849,35 +904,11 @@ export function AgentVisualizer() {
         onToggleFiles={toggleFiles}
         onToggleChat={toggleChat}
         onToggleTokens={toggleTokens}
-        onNewAgent={() => setShowComposer(true)}
         onReturnToStudy={study.openStudyWebsite}
       />
 
-      {/* Prompt composer: build a `claude` command to launch a new agent */}
-      <PromptComposerPanel
-        visible={showComposer}
-        onClose={() => setShowComposer(false)}
-      />
-
-      {/* Replay banner (top-center) while reviewing a recorded past session */}
-      {replaying && (
-        <div
-          className="absolute top-4 left-1/2 -translate-x-1/2 font-mono text-[13px]"
-          style={{ zIndex: Z.info, pointerEvents: 'auto' }}
-        >
-          <div className="glass-card flex items-center gap-3 px-4 py-2">
-            <span style={{ color: COLORS.holoBright }}>▶ Replaying Session {replaying.number}</span>
-            <span style={{ color: COLORS.textMuted }}>recorded · read-only</span>
-            <button
-              onClick={exitReplay}
-              className="px-2.5 py-1 rounded transition-all hover:scale-[1.03]"
-              style={{ background: COLORS.liveResumeBg, border: `1px solid ${COLORS.liveResumeBorder}`, color: COLORS.liveText }}
-            >
-              Exit replay
-            </button>
-          </div>
-        </div>
-      )}
+      {/* Replay banner while reviewing a recorded past session */}
+      {replaying && <ReplayBanner number={replaying.number} onExit={exitReplay} />}
 
       {/* Study session archive — past sessions, replay to retrace steps */}
       <StudySessionArchive

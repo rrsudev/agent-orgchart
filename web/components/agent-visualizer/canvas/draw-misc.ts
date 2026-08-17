@@ -1,4 +1,4 @@
-import { Agent, NODE, CARD, TETHER } from '@/lib/agent-types'
+import { Agent, NODE, TETHER } from '@/lib/agent-types'
 import { COLORS } from '@/lib/colors'
 import { measureTextCached } from './render-cache'
 
@@ -47,16 +47,25 @@ export function wrapTextLines(
   return lines
 }
 
-export function drawTetherLine(ctx: CanvasRenderingContext2D, agent: Agent, transform: { x: number; y: number; scale: number }, canvasH: number) {
+/**
+ * Dashed line from the selected node to the agent detail card.
+ *
+ * The anchor is passed in (from `railAnchor`) rather than recomputed here: the
+ * card is a panel in a rail now, not a card at a fixed middle-left offset, and a
+ * second copy of its position is exactly how this line ended up pointing at
+ * empty canvas when the card moved.
+ */
+export function drawTetherLine(
+  ctx: CanvasRenderingContext2D,
+  agent: Agent,
+  transform: { x: number; y: number; scale: number },
+  anchor: { x: number; y: number },
+) {
   const r = agent.isMain ? NODE.radiusMain : NODE.radiusSub
 
-  // Match the detail card's fixed middle-left position (glass-card.tsx)
-  const screenLeft = CARD.margin
-  const screenTop = Math.max(100, (canvasH - CARD.detail.height) / 2)
-
-  // Convert card position (screen space) back to world coords for the tether endpoint
-  const endX = (screenLeft - transform.x) / transform.scale
-  const endY = (screenTop + CARD.detail.height * 0.3 - transform.y) / transform.scale
+  // Convert the card's screen-space anchor back to world coords.
+  const endX = (anchor.x - transform.x) / transform.scale
+  const endY = (anchor.y - transform.y) / transform.scale
 
   // Start from hex edge toward the card
   const angle = Math.atan2(endY - agent.y, endX - agent.x)

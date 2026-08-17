@@ -8,7 +8,7 @@ import { syncOnce } from './telemetry/sync'
  * Hardcoded telemetry endpoint + publishable key.
  *
  * These ship inside every published binary. No env var override, no runtime
- * fallback. All enabled installs send events to Agent Flow's Supabase project.
+ * fallback. All enabled installs send events to Agent Fruitstand's Supabase project.
  * Forks that republish under a different name must edit these constants and
  * rebuild.
  *

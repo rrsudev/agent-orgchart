@@ -182,21 +182,19 @@ export const NODE = {
 } as const
 
 export const CARD = {
+  /** Design size of the agent detail card. `height` is an estimate used for
+   *  height caps, not a fixed size — the card is laid out by its rail. */
   detail: { width: 240, height: 200 },
-
-  chat: { width: 300, maxHeight: 360, messagesMinHeight: 100, messagesMaxHeight: 240 },
-  transcript: { width: 380 },
+  /** Default keep-out margin for cursor-anchored popups (see clamp-popup-position). */
   margin: 8,
-  offsetX: 40,     // horizontal offset from agent to detail card
-  offsetY: -80,    // vertical offset from agent to detail card
 } as const
 
+/** Stacking order for everything that floats over the canvas. Bars and rails sit
+ *  below cursor-anchored surfaces, which sit below menus and tooltips. */
 export const Z = {
   info: 10,
   sidePanel: 40,
   controlBar: 50,
-  chatPanel: 50,
-  transcriptPanel: 60,
   detailCard: 100,
   contextMenu: 200,
   tooltip: 300,

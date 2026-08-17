@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Standalone setup script for Agent Flow.
+ * Standalone setup script for Agent Fruitstand.
  *
  * Performs the same hook configuration that the VS Code extension does on
  * activation, so developers can run the webview in dev mode without needing
@@ -43,7 +43,7 @@ function resolveNodePath() {
 
 function getHookScriptContent() {
   return `#!/usr/bin/env node
-// Agent Flow hook forwarder v3 — installed by the Agent Flow setup script.
+// Agent Fruitstand hook forwarder v3 — installed by the Agent Fruitstand setup script.
 // Claude Code invokes this as a command hook. It reads a discovery directory to
 // find live extension instances, checks their PIDs, and forwards the event via
 // HTTP POST. Dead instances are cleaned up automatically.
@@ -232,12 +232,12 @@ if (require.main === module) {
   const force = process.argv.includes('--force')
 
   if (!force && isAlreadySetup()) {
-    console.log('Agent Flow is already set up. Run with --force to reconfigure.')
+    console.log('Agent Fruitstand is already set up. Run with --force to reconfigure.')
     process.exit(0)
   }
 
-  console.log('Setting up Agent Flow...\n')
+  console.log('Setting up Agent Fruitstand...\n')
   ensureHookScript()
   configureHooks()
-  console.log('\nDone! New sessions will stream events to Agent Flow.')
+  console.log('\nDone! New sessions will stream events to Agent Fruitstand.')
 }

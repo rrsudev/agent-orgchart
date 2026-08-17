@@ -1,40 +1,26 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Z } from '@/lib/agent-types'
 import { COLORS } from '@/lib/colors'
+import { useLayout } from '@/lib/layout'
+import { ChromeButton, StatusDot } from './chrome'
 import {
   formatClock, elapsedMsAt, PROTOCOL_MINIMUM_MS,
   type CurrentStudySession,
 } from '@/lib/study-session-types'
 
-// The participant's session clock + controls, as a refined glass pill centered
-// at the bottom of the screen. Owns its own 1s tick so only this pill re-renders
-// each second. Shown in live view only; the replay scrubber takes the same spot
-// during replay (they never coexist).
-
-function SessionBtn({ onClick, title, children, accent }: {
-  onClick: () => void
-  title: string
-  children: React.ReactNode
-  accent?: boolean
-}) {
-  return (
-    <button
-      onClick={onClick}
-      title={title}
-      className="px-2.5 py-1 rounded text-[13px] transition-all hover:scale-[1.03]"
-      style={{
-        background: accent ? COLORS.toggleActive : COLORS.toggleInactive,
-        border: `1px solid ${accent ? COLORS.holoBright : COLORS.toggleBorder}`,
-        color: accent ? COLORS.holoBright : COLORS.textDim,
-      }}
-    >
-      {children}
-    </button>
-  )
-}
-
+/**
+ * The participant's session clock + controls, as one pill in the bottom dock's
+ * center slot. Owns its own 1s tick so only this pill re-renders each second.
+ * Shown in live view only; the replay scrubber takes the same slot during replay
+ * (they never coexist).
+ *
+ * The clock is the anchor — it is the largest thing in the pill and the only
+ * element that never collapses. Everything to its right sheds, in order: the
+ * session ordinal, then the protocol label, then the button labels. That keeps
+ * the pill inside a 360px side bar, where the old fixed row of three emoji
+ * buttons overhung both edges and clipped the clock itself.
+ */
 export function SessionTimerBar({ session, onPause, onResume, onEnd, onOpenArchive, archiveCount }: {
   session: CurrentStudySession
   onPause: () => void
@@ -43,6 +29,7 @@ export function SessionTimerBar({ session, onPause, onResume, onEnd, onOpenArchi
   onOpenArchive: () => void
   archiveCount: number
 }) {
+  const { narrow, compact } = useLayout()
   const running = session.status === 'running'
   const [, setTick] = useState(0)
   useEffect(() => {
@@ -54,55 +41,74 @@ export function SessionTimerBar({ session, onPause, onResume, onEnd, onOpenArchi
   const elapsedMs = elapsedMsAt(session, Date.now())
   const protocolMet = session.protocolReached || elapsedMs >= PROTOCOL_MINIMUM_MS
   const dotColor = running ? COLORS.complete : COLORS.paused
+  const iconOnly = compact
 
   return (
     <div
-      className="absolute bottom-4 left-1/2 -translate-x-1/2 font-mono text-[13px]"
-      style={{ zIndex: Z.controlBar, pointerEvents: 'auto' }}
+      className="glass-card is-dense flex items-center"
+      style={{ gap: narrow ? 6 : 10, color: COLORS.textMuted, paddingInline: 12 }}
     >
-      <div className="glass-card flex items-center gap-3 px-4 py-2" style={{ color: COLORS.textMuted }}>
-        {/* status dot + session clock */}
-        <span
-          className={`w-2.5 h-2.5 rounded-full ${running ? 'animate-pulse' : ''}`}
-          style={{ background: dotColor, boxShadow: `0 0 8px ${dotColor}` }}
-          aria-hidden="true"
-        />
-        <span
-          className="tabular-nums font-semibold tracking-wide"
-          style={{ color: running ? COLORS.textPrimary : COLORS.paused, minWidth: 48 }}
-          title={running ? 'Session time (recording)' : 'Session paused — the clock is stopped'}
-        >
-          {formatClock(elapsedMs)}
+      <StatusDot color={dotColor} pulse={running} size={8} />
+
+      <span
+        className="ui-md ui-num font-semibold tracking-tight"
+        style={{ color: running ? COLORS.textPrimary : COLORS.paused }}
+        title={running ? 'Session time (recording)' : 'Session paused — the clock is stopped'}
+      >
+        {formatClock(elapsedMs)}
+      </span>
+
+      {/* Session ordinal + protocol status read as one dim meta group beside the
+          clock rather than as two more chips competing with it. */}
+      {!narrow && (
+        <span className="ui-xs flex items-center gap-1.5 shrink-0" style={{ color: COLORS.textMuted }}>
+          <span>Session {session.number}</span>
+          <span aria-hidden="true" style={{ opacity: 0.5 }}>·</span>
+          <span
+            style={{ color: protocolMet ? COLORS.complete : COLORS.textFaint }}
+            title={protocolMet
+              ? 'You have met the 15-minute session minimum.'
+              : 'Study protocol: each session should run at least 15 minutes of active time.'}
+          >
+            {protocolMet ? '15m met' : '15m min'}
+          </span>
         </span>
-        <span style={{ color: COLORS.textMuted }}>Session {session.number}</span>
-        {!running && <span className="text-[11px]" style={{ color: COLORS.paused }}>PAUSED</span>}
+      )}
 
-        {/* 15-minute protocol status */}
-        <span
-          className="text-[11px] px-1.5 py-0.5 rounded"
-          title={protocolMet
-            ? 'You have met the 15-minute session minimum.'
-            : 'Study protocol: each session should run at least 15 minutes of active time.'}
-          style={{
-            color: protocolMet ? COLORS.complete : COLORS.textFaint,
-            background: protocolMet ? COLORS.holoBg05 : 'transparent',
-            border: `1px solid ${protocolMet ? COLORS.holoBorder08 : 'transparent'}`,
-          }}
-        >
-          {protocolMet ? '15m ✓' : '15m min'}
-        </span>
+      {!running && (
+        <span className="ui-2xs uppercase tracking-wide shrink-0" style={{ color: COLORS.paused }}>Paused</span>
+      )}
 
-        <span className="w-px self-stretch" style={{ background: COLORS.panelSeparator }} />
+      <span aria-hidden="true" className="shrink-0" style={{ width: 1, height: 16, background: COLORS.panelSeparator }} />
 
-        {/* controls */}
-        {running
-          ? <SessionBtn onClick={onPause} title="Pause the session clock (agents keep working)">⏸ Pause</SessionBtn>
-          : <SessionBtn onClick={onResume} title="Resume the session clock" accent>▶ Resume</SessionBtn>}
-        <SessionBtn onClick={onEnd} title="End this session and start a new one (resets the clock)">⏹ End</SessionBtn>
-        <SessionBtn onClick={onOpenArchive} title="View past sessions (retrace your steps)">
-          🗂 Sessions{archiveCount > 0 ? ` (${archiveCount})` : ''}
-        </SessionBtn>
-      </div>
+      {running
+        ? (
+          <ChromeButton size="sm" icon="pause" iconOnly={iconOnly} onClick={onPause}
+            aria-label="Pause the session clock"
+            title="Pause the session clock (agents keep working)">
+            Pause
+          </ChromeButton>
+        ) : (
+          <ChromeButton size="sm" tone="accent" icon="play" iconOnly={iconOnly} onClick={onResume}
+            aria-label="Resume the session clock"
+            title="Resume the session clock">
+            Resume
+          </ChromeButton>
+        )}
+
+      <ChromeButton size="sm" icon="stop" iconOnly={iconOnly} onClick={onEnd}
+        aria-label="End this session"
+        title="End this session and start a new one (resets the clock)">
+        End
+      </ChromeButton>
+
+      <ChromeButton size="sm" icon="archive" iconOnly={iconOnly && archiveCount === 0} onClick={onOpenArchive}
+        aria-label={`Past sessions${archiveCount > 0 ? ` (${archiveCount})` : ''}`}
+        title="View past sessions (retrace your steps)">
+        {iconOnly
+          ? (archiveCount > 0 ? <span className="ui-num">{archiveCount}</span> : null)
+          : <>Sessions{archiveCount > 0 ? <span className="ui-num"> ({archiveCount})</span> : null}</>}
+      </ChromeButton>
     </div>
   )
 }

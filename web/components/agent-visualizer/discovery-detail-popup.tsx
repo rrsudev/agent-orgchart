@@ -28,7 +28,7 @@ export function DiscoveryDetailPopup({ discovery, position, onClose }: Discovery
     <DetailPopup position={position} width={POPUP.discovery.width} estimatedHeight={POPUP.discovery.estimatedHeight} onClose={onClose}>
       <PanelHeader onClose={onClose}>
         <span
-          className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded"
+          className="ui-2xs font-bold px-1.5 py-0.5 rounded shrink-0"
           style={{ background: typeColor + '20', color: typeColor, border: `1px solid ${typeColor}30` }}
         >
           {typeLabel}
@@ -37,7 +37,7 @@ export function DiscoveryDetailPopup({ discovery, position, onClose }: Discovery
 
       {/* Label */}
       <div
-        className="text-[11px] font-mono font-semibold mb-2"
+        className="ui-xs font-semibold mb-2"
         style={{ color: typeColor, wordBreak: 'break-all' }}
       >
         {discovery.label}
@@ -46,13 +46,12 @@ export function DiscoveryDetailPopup({ discovery, position, onClose }: Discovery
       {/* Content */}
       {discovery.content && (
         <div
-          className="rounded px-2 py-1.5 text-[9px] font-mono whitespace-pre-wrap"
+          className="panel-scroll rounded px-2 py-1.5 ui-2xs whitespace-pre-wrap break-words"
           style={{
             background: COLORS.holoBg03,
             border: `1px solid ${COLORS.holoBorder08}`,
             color: COLORS.textPrimary + '90',
             maxHeight: 120,
-            overflow: 'auto',
           }}
         >
           {discovery.content}
@@ -60,7 +59,7 @@ export function DiscoveryDetailPopup({ discovery, position, onClose }: Discovery
       )}
 
       {/* Agent attribution */}
-      <div className="mt-1.5 text-[9px] font-mono" style={{ color: COLORS.textMuted }}>
+      <div className="mt-1.5 ui-2xs truncate" style={{ color: COLORS.textMuted }} title={discovery.agentId}>
         agent: {discovery.agentId}
       </div>
     </DetailPopup>

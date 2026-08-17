@@ -11,7 +11,7 @@ import { DEFAULT_RELAY_PORT, DEV_WEB_ORIGIN_PATTERN } from '../extension/src/con
 async function main() {
   const workspace = process.argv[2] || process.cwd()
 
-  console.log('Starting Agent Flow dev relay...\n')
+  console.log('Starting Agent Fruitstand dev relay...\n')
   console.log(`Workspace: ${workspace}`)
 
   const relay = await createRelay({ workspace, verbose: true })
@@ -46,7 +46,7 @@ async function main() {
     }
 
     res.writeHead(200, { 'Content-Type': 'text/plain' })
-    res.end('Agent Flow Dev Relay')
+    res.end('Agent Fruitstand Dev Relay')
   })
 
   server.listen(DEFAULT_RELAY_PORT, '127.0.0.1', () => {

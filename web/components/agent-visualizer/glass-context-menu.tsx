@@ -6,11 +6,15 @@ import { COLORS } from '@/lib/colors'
 import { GlassCard } from './glass-card'
 import { useClickOutside } from '@/hooks/use-click-outside'
 import { stopPropagationHandlers } from './shared-ui'
+import { Icon, type IconName } from './chrome'
 
 interface ContextMenuProps {
   position: { x: number; y: number }
   items: Array<{
     label?: string
+    /** Leading glyph. Drawn from the shared icon set so menu rows match the rest
+     *  of the chrome — emoji rendered at their own size and color here. */
+    icon?: IconName
     onClick?: () => void
     danger?: boolean
     separator?: boolean
@@ -53,10 +57,15 @@ export function GlassContextMenu({ position, items, onClose }: ContextMenuProps)
                   item.onClick?.()
                   onClose()
                 }}
-                className="w-full px-3 py-1.5 text-left text-[11px] font-mono transition-colors hover:bg-white/5"
+                className="w-full px-3 py-1.5 flex items-center gap-2 text-left ui-sm transition-colors hover:bg-black/5"
                 style={{ color: item.danger ? COLORS.error : COLORS.textPrimary }}
               >
-                {item.label}
+                {item.icon && (
+                  <span className="shrink-0" style={{ color: COLORS.textMuted }}>
+                    <Icon name={item.icon} />
+                  </span>
+                )}
+                <span className="min-w-0 truncate">{item.label}</span>
               </button>
             )
           )}

@@ -52,6 +52,28 @@
   --scrollbar-thumb: rgba(var(--hairline-rgb), 0.18);
   --scrollbar-thumb-hover: rgba(var(--hairline-rgb), 0.3);
 
+  /* ── UI type scale ──────────────────────────────────────────────────────
+     Four steps, and only four. Chrome that needs to read as "secondary" gets
+     a step down rather than an arbitrary pixel value, so a dense panel keeps
+     its hierarchy instead of flattening into one size. 11px is the floor —
+     dense metadata only (counts, timers, badges), matching VS Code's own
+     smallest UI text. */
+  --ui-2xs: 11px;   /* counts, timestamps, badges, unit suffixes */
+  --ui-xs: 12px;    /* secondary labels, panel section headers */
+  --ui-sm: 13px;    /* default: control labels, body copy */
+  --ui-md: 15px;    /* panel and dialog titles */
+
+  /* ── Control metrics ────────────────────────────────────────────────────
+     Every button/chip/tab in the chrome resolves to one of two heights, so
+     rows of mixed controls line up on a shared baseline instead of each
+     control sizing itself from its own padding + font. */
+  --ctl-h: 28px;
+  --ctl-h-sm: 24px;
+  --ctl-pad-x: 10px;
+  --ctl-pad-x-sm: 8px;
+  --ctl-radius: 8px;
+  --ctl-gap: 6px;
+
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: oklch(0.205 0 0);
@@ -156,6 +178,14 @@
 /* Frosted-glass material — Apple "vibrancy": translucent white, a hairline
    border, and a soft diffuse shadow (depth via shadow + layering, not glow). */
 .glass-card {
+  /* The ::before highlight is absolutely positioned; without a containing block
+     here it would resolve against whatever positioned ancestor happened to be
+     above it and paint a stray hairline across that element. Cards that need a
+     different position (fixed/absolute placement) still override this inline. */
+  position: relative;
+  /* Keep the highlight and any inner blend effects from leaking into the
+     canvas compositing layer behind the card. */
+  isolation: isolate;
   background: var(--glass-bg);
   /* Light blur only — the surface is a near-opaque light gray, so we no longer
      over-saturate the backdrop (which was reading as dark/muddy). */
@@ -219,6 +249,44 @@
   background: var(--scrollbar-thumb-hover);
 }
 
+/* Dense panels (side rails) trade a little padding for content — the roomier
+   default stays for dialogs and detail cards. */
+.glass-card.is-dense {
+  padding: 10px;
+}
+
+/* A panel's place in a side rail (see components/agent-visualizer/side-rail).
+   `min-height: 0` on both the slot and its panel is what lets a crowded column
+   shrink its panels — a flex item defaults to `min-height: auto`, which refuses
+   to go below its content and would push the last panel past the rail instead.
+   An empty slot collapses so a closed panel leaves no gap in the column. */
+.rail-slot {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-width: 100%;
+  pointer-events: auto;
+}
+.rail-slot > * {
+  min-height: 0;
+}
+.rail-slot:empty {
+  display: none;
+}
+.rail-slot.is-bottom {
+  margin-top: auto;
+}
+
+/* Any scrolling region inside a panel: keeps a wheel that reaches the end of
+   the list from scrolling the surface (or the host editor) behind it, and
+   keeps the thin scrollbar consistent across engines. */
+.panel-scroll {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
 /* Hide scrollbar but keep scroll functionality */
 .scrollbar-hide {
   -ms-overflow-style: none;
@@ -238,14 +306,31 @@
   font-family: var(--font-mono);
 }
 
-/* Accessibility: floor the dense metadata sizes so nothing reads too small. */
+/* Compatibility shim for the arbitrary pixel sizes still scattered through the
+   components. Rather than let each one render at its literal value (8–11px is
+   below the legibility floor) or flatten them all onto one size (which is what
+   a blanket 12.5px floor did — metadata and body copy became indistinguishable,
+   and every fixed-width panel outgrew its box), each tier resolves to the
+   matching step of the scale above. New code should use the tokens directly. */
 .text-\[8px\],
 .text-\[9px\],
 .text-\[10px\] {
-  font-size: 12.5px;
+  font-size: var(--ui-2xs);
 }
 .text-\[11px\] {
-  font-size: 13px;
+  font-size: var(--ui-xs);
+}
+
+/* ── Type-scale utilities ─────────────────────────────────────────────────── */
+.ui-2xs { font-size: var(--ui-2xs); }
+.ui-xs { font-size: var(--ui-xs); }
+.ui-sm { font-size: var(--ui-sm); }
+.ui-md { font-size: var(--ui-md); }
+
+/* Numeric readouts (clocks, token counts) hold their width as digits change. */
+.ui-num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
 }
 
 /* Visible keyboard focus on all interactive DOM controls. */
