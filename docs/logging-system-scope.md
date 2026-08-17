@@ -1,17 +1,32 @@
-# Logging & Persistence System — Scope
+# Logging & Persistence System
 
-> Status: scoping / design proposal. No code written yet.
-> Goal: capture the **maximum amount of non‑ephemeral, per‑tab (per‑session)** data
-> into a single **local `study-storage/` folder** that a research participant can
-> **zip and send** to researchers. Research tool, VS Code extension, <10 users, no
-> cloud. See **Part 3** for the concrete design; the companion format spec that
-> ships inside the folder is [`docs/study-storage-format.md`](./study-storage-format.md).
+> **Status: implemented and shipping** (extension 1.3.0). This began as a scoping
+> document; Parts 1–2 still describe the ingestion side accurately, and Part 3 —
+> once a proposal — now documents **what was actually built**, corrected against
+> the code and against real capture folders on disk.
+>
+> Goal, unchanged: capture the **maximum amount of non‑ephemeral, per‑tab
+> (per‑session)** data into a single local capture folder that a research
+> participant can **zip and send** to researchers. Research tool, VS Code
+> extension, <10 users, no cloud.
+>
+> **Two things moved since the original proposal — if you read only one note, read
+> this one:**
+> - The capture folder is **no longer inside the project repo**. It lives at
+>   `~/.agent-flow-study/<workspace>-<hash8>/`, one subfolder per workspace, so it
+>   survives uninstalling the extension and never sits in a git working tree
+>   (§3.3).
+> - The override setting is **`agentFlowStudy.studyStorage.path`**, not
+>   `agentVisualizer.studyStoragePath`.
+>
+> The companion format spec — a copy of which ships inside the folder as
+> `README.md` — is [`docs/study-storage-format.md`](./study-storage-format.md).
 
-This document has three parts, matching the ask:
+This document has three parts:
 
-1. How logging and JSONLs work today, and how they are stored.
+1. How logging and JSONLs work, and how the runtimes store them.
 2. A complete inventory of the information available per JSONL file and where it lives.
-3. A proposed design for the local, maximum‑fidelity `study-storage` capture folder.
+3. The local, maximum‑fidelity capture folder **as built**.
 
 ---
 
@@ -51,22 +66,39 @@ same normalized `AgentEvent` envelope, then de‑dupes them:
 The merge/de‑dup happens in `extension/src/claude-runtime.ts`. Full narrative:
 [`docs/claude-hooks-pipeline.md`](./claude-hooks-pipeline.md).
 
-### 1.3 Everything downstream is **ephemeral** — there is no persistence today
+### 1.3 The transport is ephemeral; the capture layer is not
 
-This is the crux for the new system. The current storage story:
+The distinction matters, because the two are often confused when reading this code.
+
+**Transport — still ephemeral, by design.** Nothing here is a record:
 
 - The relay (`scripts/relay.ts`) holds sessions in an in‑memory `Map` and buffers
   **at most `MAX_EVENT_BUFFER = 5000` events per session, in memory only**. On a
-  new SSE client it replays that buffer. **Nothing is written to disk.**
+  new SSE client it replays that buffer. It writes nothing to disk.
 - Transport to the browser is **SSE** (`/events`, default port 3001) or VS Code
-  `postMessage`. No websocket, no API, no database.
-- The only things the app *writes* anywhere are: discovery/port files
-  (`~/.claude/agent-flow/*.json`), Claude `settings.json` hook config, opt‑out
-  aggregate telemetry (`~/.agent-flow/telemetry/events.jsonl`), and **client tab
-  renames in browser `localStorage`** (`agent-orgchart:session-labels`).
+  `postMessage`. No websocket, no API.
+- The webview keeps its own per‑session event buffer and replays it on tab switch.
 
-So "a better logging system" is essentially **net‑new**: today the raw JSONLs are
-the only durable record, and they live only on the machine that ran the agent.
+**Capture — durable, and the point of the study build.** In the VS Code extension,
+`StudyStorage` (`extension/src/study-storage.ts`, wired up in
+`extension/src/study-vscode.ts`) sits alongside that transport and writes every
+stream to disk as it arrives. It is **on by default** in this build; consent is
+handled at study enrollment rather than by an in‑editor prompt.
+
+Writes are **synchronous appends** (`fs.appendFileSync`, `study-storage.ts:419`) —
+one line per record, no buffering and no flush interval — so a crash or a force
+quit loses at most the record being written. Files that are rewritten rather than
+appended (`session.json` and the rollups) go through a temp‑file‑then‑rename so a
+reader never sees a half‑written file (`study-storage.ts:352`).
+
+Also written outside the capture folder, unchanged: discovery/port files
+(`~/.claude/agent-flow/*.json`), the Claude `settings.json` hook config, opt‑out
+aggregate telemetry (`~/.agent-flow/telemetry/events.jsonl`), and client‑side tab
+renames in `localStorage` (`agent-orgchart:session-labels`).
+
+The raw runtime JSONLs remain the source of truth; the capture folder's job is to
+copy them somewhere that survives the session, plus record the signals that only
+exist at runtime (§3.5).
 
 ### 1.4 "Tabs" == sessions
 
@@ -225,26 +257,52 @@ A single top‑level directory — call it **`study-storage/`** — that is:
   DB *and* kept as raw files, so a researcher who only opens `study.sqlite` still
   has everything, and a researcher who only has the raw files loses nothing either.
 
-### 3.3 Location — inside the project repo
+### 3.3 Location — a capture home outside every repo
 
-The study lives inside **one repo**, so the folder goes at the **workspace root**
-for maximum findability — it shows up right in the VS Code file explorer next to
-the code it describes:
+> **Changed from the original proposal.** The folder was going to live at the
+> workspace root (`<workspace-root>/study-storage/`) for findability. It doesn't
+> any more, for two reasons that only became obvious in use: participants work
+> across more than one project, and a capture folder inside a git working tree is
+> one `git clean` or one fresh clone away from being destroyed. It also grows —
+> a `study.sqlite` of tens of megabytes inside the repo the participant is
+> actively working in is a hazard, not a convenience.
+
+Capture goes to a **single home directory, one subfolder per workspace**:
 
 ```
-<workspace-root>/study-storage/
+~/.agent-flow-study/<workspace-basename>-<hash8>/
 ```
 
-- Overridable via a new setting `agentVisualizer.studyStoragePath` (relative paths
-  resolve against the workspace root).
-- Surface it in the extension UI anyway ("Reveal Study Folder" + "Package Study
-  Data" commands) so participants never hunt for it.
-- **Git hygiene:** the capturer auto‑adds `study-storage/` to the repo's
-  `.gitignore` on first run. The data is full‑fidelity transcripts (large, and not
-  source code); it should travel by **zip‑and‑send**, not by being committed. It
-  stays perfectly findable in the file tree either way.
-- Because storage is scoped to this one project, **backfill only needs this
-  project's history** (§3.7) — no cross‑project scan.
+- `STUDY_STORAGE_BASE = path.join(os.homedir(), '.agent-flow-study')`
+  (`study-vscode.ts:36`); the per‑workspace subfolder key is the workspace
+  basename plus a short hash of its full path, so two projects with the same
+  folder name never collide.
+- It is **outside every repo**, so it cannot be committed, cleaned, or lost with a
+  reclone, and it **survives uninstalling the extension**.
+- Overridable via **`agentFlowStudy.studyStorage.path`** (relative to the
+  workspace). Setting it opts out of the per‑workspace subfolder — the configured
+  path becomes the root directly (`study-vscode.ts:62-64`). If you point it back
+  inside a repo, the capturer adds the folder to that repo's `.gitignore` on first
+  run (`study-storage.ts:673`).
+- Two commands surface it so participants never hunt for it:
+  `Agent Fruitstand: Reveal Study Data Folder` and
+  `Agent Fruitstand: Package Study Data (Zip)`.
+- Because one home now holds **every** workspace, the zip command packages the
+  whole home rather than the current workspace's subfolder — see §3.8.
+
+**⚠️ Two entry points, two different defaults.** The VS Code extension is not the
+only thing that writes capture data, and the other path never moved:
+
+| Entry point | Default capture root |
+|---|---|
+| VS Code extension | `~/.agent-flow-study/<workspace>-<hash8>/` (`study-vscode.ts:36`) |
+| Relay / standalone (`pnpm dev`, `npx agent-flow-app`) | **`<workspace>/study-storage/`** (`relay.ts:56-59`), env‑overridable via `AGENT_FLOW_STUDY_STORAGE` |
+
+So a machine that has used both ends up with capture data in **both** places, and
+the in‑repo one is gitignored, which makes it easy to miss. This repo currently
+has exactly that: an active `study-storage/` at the workspace root *and*
+`~/.agent-flow-study/agent-orgchart-<hash>/`. **When collecting participant data,
+check both roots** — the zip command only packages the extension's home.
 
 ### 3.4 Directory layout (per‑tab = per‑session)
 
@@ -370,11 +428,17 @@ Design points:
 
 ### 3.8 Transfer / "zip & send" workflow
 
-- A command **"Agent Fruitstand: Package Study Data"** produces
-  `study-storage-<participant>-<date>.zip` from the folder.
-- `README.md` inside the folder tells the participant exactly what to send and to
-  whom, and tells the researcher how to load `study.sqlite` (a two‑line
-  `sqlite3`/pandas snippet) and how to replay a session in the visualizer.
+- **`Agent Fruitstand: Package Study Data (Zip)`** (`study-vscode.ts:110`) is the
+  whole workflow. It flushes the live sessions, rebuilds `study.sqlite` so the
+  index in the archive is current, then opens a save dialog defaulting to
+  **`agent-flow-study-data.zip`** beside the capture home.
+- It zips the **packaging root — the entire `~/.agent-flow-study` home**, not just
+  the current workspace's subfolder, so a participant who worked across several
+  projects ships all of them in one archive and nothing is silently left behind.
+- If no platform compressor succeeds, it falls back to revealing the folder with
+  instructions to compress it by hand — the command never fails silently.
+- `README.md` inside the folder tells the participant what to send, and tells the
+  researcher how to load `study.sqlite` and how to replay a session.
 - Because it's just files, `scp`, a shared drive, or email all work; no
   infrastructure on the receiving end.
 
@@ -386,45 +450,67 @@ output, `cwd`, `gitBranch`, usernames in paths, possibly pasted secrets. That is
 intentional (it's the research data), so the controls are about **consent and
 custody**, not stripping data:
 
-- **Explicit study consent** recorded in `MANIFEST.json` (`consent: true` + when),
-  gated behind a first‑run dialog. Capture is off until consent is given.
-- **Local‑only by default.** Nothing leaves the machine until the participant
-  chooses to zip and send — no automatic upload anywhere.
-- **Visible & inspectable.** Participant can open the folder, read it, and delete
-  any session before sending.
-- **Optional redaction hook** (off by default for max fidelity) if a study needs
-  to scrub secret‑shaped strings before packaging.
+- **Nothing is redacted, truncated, or hashed.** There is no scrubbing pass in the
+  capture path — searching `study-storage.ts` for redaction turns up nothing,
+  because none exists. Prompts, model output, thinking, file contents, and command
+  output land on disk verbatim. Treat a capture folder as equivalent to handing
+  over the participant's terminal history for the period.
+- **Consent is handled at study enrollment, not in the editor.** Capture is **on by
+  default** in this build (`agentFlowStudy.studyStorage.enabled` defaults to
+  `true`); installing the study build *is* the participant accepting recording.
+  There is no first‑run dialog. `MANIFEST.json` records `consent: true` as a fact
+  about the build, not as evidence of an in‑editor click — the consent record of
+  record lives in the study's enrollment paperwork.
+- **Local‑only.** Nothing leaves the machine until the participant chooses to zip
+  and send — no automatic upload anywhere.
+- **Visible & inspectable.** The participant can open the folder, read it, and
+  delete any session folder before sending. The shipped `README.md` says so
+  explicitly.
+- **To pause capture** (rarely needed): set
+  `agentFlowStudy.studyStorage.enabled: false`. See `study/vscode-settings.jsonc`
+  for the participant‑facing settings file.
+- The **participant id** (`agentFlowStudy.studyStorage.participantId`) is optional
+  and tags `MANIFEST.json`; unset, it records `"anonymous"`. It only affects
+  sessions captured after it is set, so it can be filled in later for bookkeeping.
 
-### 3.10 Phasing (status)
+### 3.10 Status
 
-1. ✅ **DONE — StudyStorage sink** (`extension/src/study-storage.ts`): raw bundle
-   mirror + `hooks.jsonl` + `events.jsonl` per session, `MANIFEST.json`, folder
-   `README.md`, auto `.gitignore`. Wired into `scripts/relay.ts` via
-   `AGENT_FLOW_STUDY_STORAGE` / `AGENT_FLOW_STUDY_PARTICIPANT`.
-2. ✅ **DONE — `study.sqlite` index + backfill** (`extension/src/study-index.ts`,
-   built on `node:sqlite`, WAL, rebuild-from-scratch; backfill importer for this
-   project's history into `backfill/`). Auto-built at relay startup/shutdown;
-   rebuildable via `pnpm run study:index`.
-3. ✅ **DONE — Extension host wiring + UX.** `StudyStorage` is wired into the VS
-   Code Claude runtime (`session-watcher.ts` taps + `claude-runtime.ts` hook
-   taps + backfill/index). Settings: `agentVisualizer.studyStorage.enabled`
-   (off by default), `.path`, `.participantId`. First-run **consent dialog**
-   (per-workspace). Commands: **Reveal Study Data Folder**, **Package Study Data
-   (Zip)** (best-effort native zip + index rebuild, falls back to reveal).
-   `onStartupFinished` activation so capture runs without opening the panel.
-   Consent glue in `study-vscode.ts`.
-4. **Optional redaction hook** before packaging (not yet built). (Codex raw
-   capture is out of scope by decision.)
+Everything below is built and shipping as of extension 1.3.0.
+
+1. ✅ **StudyStorage sink** (`extension/src/study-storage.ts`): raw bundle mirror +
+   `hooks.jsonl` + `events.jsonl` per session, `MANIFEST.json`, folder `README.md`,
+   auto `.gitignore` when the root sits inside a repo. Also wired into
+   `scripts/relay.ts` via `AGENT_FLOW_STUDY_STORAGE` /
+   `AGENT_FLOW_STUDY_PARTICIPANT` for the non‑extension entry points.
+2. ✅ **`study.sqlite` index + backfill** (`extension/src/study-index.ts`, built on
+   `node:sqlite`, WAL, rebuild‑from‑scratch; backfill importer into `backfill/`).
+   Rebuildable out of band via `pnpm run study:index`.
+3. ✅ **Extension host wiring + UX.** Taps in `session-watcher.ts` (transcripts) and
+   `claude-runtime.ts` (hooks). Settings: `agentFlowStudy.studyStorage.enabled`
+   (**on** by default in the study build), `.path`, `.participantId`. Commands:
+   **Reveal Study Data Folder**, **Package Study Data (Zip)**.
+   `onStartupFinished` activation, so capture runs whether or not the participant
+   ever opens the visualizer panel.
+4. ✅ **Study‑session (work‑period) capture** — the participant clock, its lifecycle
+   markers, and the per‑period event slice (§3.5, and "Study sessions" in the
+   format spec).
+
+**Not built, by decision:** any redaction or scrubbing pass (§3.9), and raw Codex
+bundle capture (Codex sessions are indexed and their transcripts backfilled, but
+the live raw‑bundle mirror is Claude‑only).
 
 ### 3.11 Decisions (resolved)
 
-- **Folder location**: ✅ **per‑project**, at `<workspace-root>/study-storage/`,
-  for maximum findability inside the repo. Auto‑gitignored.
+- **Folder location**: ✅ a **shared capture home outside every repo** —
+  `~/.agent-flow-study/<workspace>-<hash8>/`, one subfolder per workspace.
+  *(Reversed from the original per‑project decision — see the note in §3.3.)*
 - **SQLite index**: ✅ **yes** — raw JSONL (source of truth) + `study.sqlite`
   (queryable index) for analysis down the road.
 - **Backfill**: ✅ **yes, all of this project's history**, imported into a separate
   `backfill/` subfolder (kept apart from live `live/` data), tagged `source` in
   the DB.
+- **Consent**: ✅ handled at **enrollment**, not by an in‑editor prompt; capture is
+  on by default in the study build.
 
 ---
 

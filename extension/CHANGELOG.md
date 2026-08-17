@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.3.0
+
+- **Interface rebuilt for real editor sizes.** The panel was authored for a wide browser tab and broke down when docked: at a side-bar width the session tabs printed on top of the right-hand controls, the session-clock pill overhung both screen edges (clipping its own digits), and the floating panels stacked on the same corner. Every one of those was reproducible at 360px, 520px, and 760px; none of them remain at any width from 320px up.
+  - **Measured layout.** The top bar and bottom dock report their real heights, and every panel positions against those instead of hardcoded offsets (`top: 66`, `window.innerHeight`, and a fixed bottom-left corner were each in use). Panels now live in left/right rails that own placement and width, so a crowded column shrinks its panels — each scrolling internally — rather than letting them overlap.
+  - **Adaptive chrome.** Top-bar controls shed decoration, then labels, then fold into an overflow menu; nothing is ever dropped, only relocated. Session tabs compress toward a floor before the strip scrolls, and the controls yield space to them first, so tabs stay usable with six sessions open on a docked column. The selected tab keeps more of its name than its neighbours.
+  - **One bottom dock.** The legend launcher, the study clock, and the replay scrubber were three independently positioned bars that could sit on top of each other; they now share one row with real slots. Fixes the replay scrubber running up to 95px past the right edge on mid-width windows.
+  - **Consistent controls.** All chrome resolves to two heights and one type scale, with inline SVG glyphs replacing emoji (which rendered at unpredictable sizes and carried their own color). The Global/Tab switch in the conversation panel is a single segmented control that holds its geometry instead of resizing as you switch.
+  - Accessibility: keyboard operability and accessible names added to controls that were mouse-only (file rows, the collapsed conversation pill, the close affordance on tabs); scrubber is now an ARIA slider with arrow-key seeking.
+- **Removed the "New agent" composer.** The command-builder panel and its templates are gone from the interface.
+- Housekeeping: dropped three panels that were unreferenced since the conversation panels were merged, and fixed the workspace filter in the root `build:extension` / `dev:extension` scripts, which had been broken by the extension's package rename.
+
 ## 1.1.0
 
 - **Rebrand to Agent Fruitstand** — all user-facing product text (panel, commands, web app title, setup/CLI output, docs) now reads "Agent Fruitstand". Internal identifiers are intentionally unchanged (command IDs, configuration keys under `agentFlowStudy.*`, and the `~/.agent-flow-study` capture folder) so existing participant settings, keybindings, hook configs, and already-captured session data keep working.

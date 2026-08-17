@@ -695,6 +695,13 @@ sessions, produced by the Agent Fruitstand research build. Each session (each vi
 
 \`MANIFEST.json\` at the top records the participant id, tool version, and capture window.
 
+Two more logs sit at the top level, outside the per-session folders:
+
+- \`interactions.jsonl\` — when you rename an agent or a tab, or reopen a closed
+  session, the before/after label is recorded here.
+- \`capture-errors.log\` — any failure while capturing. Empty or missing means
+  nothing went wrong; if a session looks incomplete, this says why.
+
 ## Study sessions (participant work periods)
 
 Separate from the per-tab folders above, the tool also records the participant's

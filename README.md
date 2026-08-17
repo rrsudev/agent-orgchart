@@ -18,7 +18,7 @@ compatible editor — Cursor, Windsurf, 1.85+).
 
 - **From the editor:** Extensions view → `⋯` menu → **Install from VSIX…** → pick
   the `.vsix` file.
-- **From the CLI:** `code --install-extension agent-flow-study-1.0.0.vsix`
+- **From the CLI:** `code --install-extension agent-flow-study-1.3.0.vsix`
 
 ## Use it
 

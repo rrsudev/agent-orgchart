@@ -1,8 +1,9 @@
 # `study-storage/` — data format & transfer spec
 
-This is the on‑disk format for Agent Fruitstand's research capture. A copy of this file
-(as `README.md`) ships **inside** the `study-storage/` folder so that whoever
-receives a zipped copy can interpret it with no other context.
+This is the on‑disk format for Agent Fruitstand's research capture. A shorter
+participant‑facing `README.md` ships **inside** the capture folder (generated from
+`README_TEMPLATE` in `extension/src/study-storage.ts`) so that whoever receives a
+zipped copy can orient with no other context; this file is the full spec.
 
 - **What it is:** a single, self‑contained folder holding the maximum‑fidelity
   record of every Claude Code / Codex session (each visualizer "tab") captured on
@@ -12,10 +13,20 @@ receives a zipped copy can interpret it with no other context.
 - **Design heuristic:** richness and non‑ephemeral availability above all. When in
   doubt, more data is kept, raw, in more than one form.
 
-Location: **`<project-root>/study-storage/`** — inside the study repo, so it's
-visible in the editor's file tree (overridable via the
-`agentVisualizer.studyStoragePath` setting). It is git‑ignored by default; it
-travels by zip‑and‑send, not by being committed.
+Location: **`~/.agent-flow-study/<workspace-basename>-<hash8>/`** — one subfolder
+per workspace, under a single capture home in the participant's home directory.
+It sits **outside every repo**, so it can't be committed, `git clean`ed, or lost
+to a reclone, and it survives uninstalling the extension. Overridable via the
+`agentFlowStudy.studyStorage.path` setting (relative to the workspace); setting it
+opts out of the per‑workspace subfolder and uses that path as the root directly,
+and if that path lands inside a repo the capturer adds it to `.gitignore` on first
+run. Data travels by zip‑and‑send.
+
+> **Check both roots when collecting.** The relay / standalone entry points
+> (`pnpm dev`, `npx agent-flow-app`) still default to `<workspace>/study-storage/`
+> instead, so a machine that has used both ends up with capture data in two
+> places. The in‑repo one is gitignored and easy to miss, and the zip command only
+> packages the extension's home.
 
 ---
 
@@ -25,16 +36,19 @@ Live capture and backfilled history are kept in two sibling folders with identic
 internal structure, so they never intermingle:
 
 ```
-study-storage/
-  README.md                     # this document (shipped inside the folder)
+~/.agent-flow-study/<workspace>-<hash8>/
+  README.md                     # short participant-facing orientation
   MANIFEST.json                 # participant + consent + tool/schema versions + machine + capture window
-  study.sqlite                  # queryable index over ALL sessions, live + backfill (single-file SQLite DB)
+  study.sqlite                  # queryable index over live + backfill sessions (single-file SQLite DB)
+  capture-errors.log            # plaintext log of any capture failure (see "When capture fails")
   study-sessions.jsonl          # append-only marker log of EVERY study-session action (start/pause/resume/end/protocol)
+  interactions.jsonl            # append-only log of UI interactions (renames, session resume)
   study-sessions/               # one folder per participant "work period" (see below)
     <NNN>-<id>/
       session.json              # timings, running duration, 15-min protocol status, tabs used
       events.jsonl              # the event-stream slice captured during this session's window
       lifecycle.jsonl           # this session's own start/pause/resume/end markers
+      interactions.jsonl        # interactions during this window (only if any occurred)
   live/                         # sessions captured in real time after install
     sessions/
       <runtime>-<session-uuid>/  # ONE folder per tab/session
@@ -48,7 +62,6 @@ study-storage/
           agent-<id>.meta.json   # verbatim sidecar: agentType, description, toolUseId, spawnDepth
         tool-results/
           <id>.txt               # verbatim externalized large tool outputs
-        attachments/             # copies of attachment payloads referenced by the transcript
   backfill/                     # this project's history, imported once at startup
     sessions/
       claude-<session-uuid>/     # transcript + subagents + tool-results only
@@ -69,14 +82,23 @@ derives structured turns / tool-calls / tokens uniformly for live and backfill.
 
 ---
 
-## The four captured streams (per session)
+## The captured streams (per session)
 
 | File | Source | Why it's kept |
 |---|---|---|
 | `transcript.jsonl` | Claude/Codex raw transcript | Source of truth: prompts, responses, thinking, tool_use/result, **verbatim `message.usage` tokens**, real timestamps, `cwd`, `gitBranch`, versions, mode changes, ai‑title. |
 | `hooks.jsonl` | Claude Code hook POSTs | Out‑of‑band signals not clean in the transcript: **permission prompts**, `PostToolUseFailure`, precise per‑hook timing, lifecycle edges. |
 | `events.jsonl` | app's normalized `AgentEvent` | Reproduces the rendered visualization without re‑parsing. |
-| `environment.json` | runtime host | OS/arch, Node version, Claude Code / Codex versions, `CODEX_HOME`, model ids observed. |
+| `environment.json` | runtime host | OS/arch/release, Node version, tool version, runtime, and the literal `CODEX_HOME` if set. No other environment variables. |
+
+> **Codex is not captured symmetrically.** In the VS Code build the Codex runtime
+> is never handed the capture sink, so a Codex session produces no folder at all;
+> backfill is Claude‑only. Only the relay path can produce a `codex-<id>/` folder,
+> and even then it holds `events.jsonl` + metadata — never a rollout mirror.
+
+> **One hook payload limit worth knowing:** a hook POST larger than 32 MB is
+> rejected outright by the hook server, so it never reaches `hooks.jsonl`. The
+> underlying tool call still appears in `transcript.jsonl`.
 
 ---
 
@@ -85,36 +107,77 @@ derives structured turns / tool-calls / tokens uniformly for live and backfill.
 ```jsonc
 {
   "schemaVersion": 1,
-  "tool": "agent-flow",
-  "toolVersion": "0.8.1",
-  "participantId": "P03",          // study-assigned, not PII
-  "consent": true,
-  "consentAt": "2026-08-10T12:00:00Z",
-  "machineId": "sha256(...)[:16]", // stable, non-identifying
+  "tool": "agent-flow",             // internal id, unchanged by the Fruitstand rebrand
+  "toolVersion": "1.3.0",
+  "participantId": "P03",           // study-assigned, not PII; "anonymous" when unset
+  "workspacePath": "/Users/x/proj", // absolute path of the captured workspace
+  "consent": true,                  // see the note below — a constant, not a click
+  "machineId": "sha256(hostname)[:16]",
   "os": "darwin", "arch": "arm64",
-  "captureStartedAt": "2026-08-10T12:00:00Z",
-  "sessionCount": 12
+  "captureStartedAt": "2026-08-10T12:00:00Z",  // preserved across rewrites
+  "sessionCount": 12                // sessions seen by the CURRENT host process
 }
 ```
+
+> `consent: true` is a hardcoded literal, not a record of an in‑editor click —
+> consent for this build is collected at study enrollment. There is no `consentAt`
+> field. And `sessionCount` counts sessions registered by the running process, so
+> it can be lower than the number of folders on disk after a restart; count the
+> folders if you need the true total.
 
 ## `session.json` (per session)
 
 ```jsonc
 {
   "id": "447ffde1-...",
+  "source": "live",                // "live" | "backfill"
   "runtime": "claude",             // "claude" | "codex"
   "projectPath": "/Users/x/proj",  // from transcript `cwd`
-  "gitBranch": "main",
-  "ccVersion": "2.1.217",
-  "aiTitle": "…",
-  "startedAt": "…", "endedAt": "…", "status": "completed",
-  "totals": {
-    "inputTokens": 0, "outputTokens": 0,
-    "cacheReadInputTokens": 0, "cacheCreationInputTokens": 0,
-    "toolCalls": 0, "subagents": 0, "turns": 0
-  }
+  "startedAt": "…",
+  "endedAt": "…",                  // null while the session is still active
+  "status": "completed",           // "active" | "completed"
+  "schemaVersion": 1
 }
 ```
+
+> Deliberately thin. Rollups (token totals, turn/tool counts) and derived metadata
+> (`gitBranch`, Claude Code version, ai‑title) are **not** written here — they are
+> columns in `study.sqlite`, computed from the transcript. If you need them without
+> SQLite, parse `transcript.jsonl`.
+
+## `environment.json` (per session)
+
+```jsonc
+{
+  "os": "darwin", "arch": "arm64", "release": "25.5.0",
+  "nodeVersion": "v22.14.0",
+  "toolVersion": "1.3.0",
+  "runtime": "claude",
+  "codexHome": null,               // literal value of CODEX_HOME, when set
+  "capturedAt": "…"
+}
+```
+
+> No other environment variables are captured, and neither the Claude Code version
+> nor the observed model ids appear here despite older drafts of this spec saying
+> so. Backfilled sessions get a smaller set: `{ os, arch, nodeVersion, toolVersion,
+> runtime, importedAt, note }`.
+
+## `interactions.jsonl` (top level, and teed per study session)
+
+Discrete UI actions that are not agent activity — currently the three that change
+how a participant labels or returns to their work:
+
+```jsonc
+{ "capturedAt": "…", "kind": "agent-rename",   // "agent-rename" | "session-rename" | "session-resume"
+  "at": "…", "agentId": "…", "sessionId": "…", "studySessionId": "…",
+  "previous": "Apple", "next": "auth refactor" }
+```
+
+Renames are recorded only when the label actually changed. `previous`/`next` hold
+the literal text the participant typed, untruncated. Because each record carries
+both `sessionId` and `studySessionId`, a rename joins to both a tab and a work
+period.
 
 ---
 
@@ -183,6 +246,25 @@ researchers use after unzipping.
 
 ---
 
+## When capture fails
+
+Capture is best‑effort and never interrupts the participant's work, so failures are
+recorded rather than raised:
+
+- **`capture-errors.log`** (top level) — plaintext, one line per failure:
+  `<ISO timestamp> [<context>] <stack or message>`. An empty or absent file means
+  nothing failed. **Check this first** when a session looks short or a stream is
+  missing.
+- The extension also surfaces a status‑bar item and a one‑time toast on the first
+  failure, so a participant can report it.
+
+Two things that look like corruption but are normal: a `*.tmp` file left in a
+session folder (an interrupted mirror — the real file beside it is still intact,
+since mirroring writes to a temp file and renames), and a `session.json` still
+reading `"status": "active"` (the host was killed before the session finalized).
+
+---
+
 ## For researchers — loading the data
 
 **Everything at once (Python):**
@@ -201,33 +283,61 @@ pd.read_sql("SELECT session_id, SUM(input_tokens+output_tokens) tok "
 To separate real‑time from historical data, filter on `source`
 (`WHERE source = 'live'` or `'backfill'`).
 
+Three caveats about the index:
+
+- It is **rebuilt from scratch**, not written during capture — it reflects the
+  files as of the last build (extension start/stop, or the packaging command).
+  Rebuild any time with `pnpm run study:index`.
+- It requires **Node ≥ 22.5** (`node:sqlite`). On an older Node it is silently
+  skipped, and `study.sqlite` may be absent or stale. The JSONL files are
+  unaffected — they remain the source of truth.
+- It indexes `live/` and `backfill/` only. The **study‑session folders,
+  `study-sessions.jsonl`, and `interactions.jsonl` are not in the database** —
+  read those as JSONL.
+
 **Full fidelity for one session:** read the raw files under
 `live/sessions/<runtime>-<id>/` (or `backfill/sessions/<runtime>-<id>/`) —
 `transcript.jsonl` is the complete record; each line is one JSON object.
 `study.sqlite` is derived from these and safe to regenerate.
 
-**Replay in the visualizer:** point Agent Fruitstand at a session folder to reconstruct
-the node‑graph from `transcript.jsonl` (+ `subagents/`, `tool-results/`).
+**Replay:** the visualizer can replay a *study session* (a participant work
+period) from its own in‑browser recording, reached from the session archive in the
+UI. There is **no** "open this capture folder and replay it" path — pointing the
+extension at a `live/sessions/<id>/` folder is not implemented. To reconstruct a
+session from captured files, parse `transcript.jsonl` directly or query
+`study.sqlite`.
 
 ---
 
-## For participants — enabling & sending your data
+## For participants — capture settings & sending your data
 
-**Enable capture (one time):** set `agentVisualizer.studyStorage.enabled` to `true`
-in VS Code settings (and optionally `agentVisualizer.studyStorage.participantId`).
-The first time Agent Fruitstand runs after that, it shows a consent dialog explaining
-what is captured; capture only starts once you choose **Enable capture**. Consent
-is remembered per workspace. Nothing is ever uploaded automatically.
+**Capture is already on.** `agentFlowStudy.studyStorage.enabled` defaults to
+`true` in the study build; installing the build is what you agreed to at
+enrollment, and there is no in‑editor consent prompt. Nothing is ever uploaded
+automatically — the only way data leaves your machine is you sending the zip.
+
+Optional, in VS Code **User** settings so it applies to every project you record:
+
+- `agentFlowStudy.studyStorage.participantId` — tags your data with your study id.
+  It only tags sessions captured *after* you set it, so it can be filled in later.
+- To pause capture (rarely needed): `agentFlowStudy.studyStorage.enabled: false`.
+  This is read **once at startup**, so reload the window after changing it.
+
+See `study/vscode-settings.jsonc` in the repo for a copy‑pasteable version.
 
 **Send your data:**
 
-1. In VS Code, run **"Agent Fruitstand: Package Study Data (Zip)"** from the Command
-   Palette — it rebuilds the index and produces a `study-storage.zip`. (Or run
-   **"Agent Fruitstand: Reveal Study Data Folder"** and compress it yourself.)
+1. Run **"Agent Fruitstand: Package Study Data (Zip)"** from the Command Palette.
+   It flushes the current sessions, rebuilds the index, and offers to save
+   `agent-flow-study-data.zip`. This archives **every** workspace you have
+   recorded, not just the current one.
 2. Send the zip to the researcher via the channel they gave you.
 
-**Note:** this folder contains the full content of your agent sessions —
-including your prompts, the model's output, file contents, and command output.
-Review it before sending; you can delete any session folder you don't want to
-share. Capture only runs after you consent, and nothing is uploaded anywhere
-automatically.
+> **"Reveal Study Data Folder" shows less than the zip contains.** Reveal opens
+> the *current workspace's* folder; the zip packages the whole
+> `~/.agent-flow-study/` home. If you compress by hand from Reveal, you will send
+> one workspace's data.
+
+**Before you send:** this folder contains the full content of your agent sessions —
+your prompts, the model's output, file contents, and command output, verbatim and
+unredacted. Review it, and delete any session folder you don't want to share.
