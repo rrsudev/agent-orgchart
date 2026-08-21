@@ -2,10 +2,14 @@
   "name": "agent-flow-study",
   "displayName": "Agent Fruitstand",
   "description": "Beta — a lightweight local companion that lays out your Claude Code agents as they branch, work, and hand off, right inside the editor.",
-  "version": "1.3.0",
+  "version": "1.5.0",
   "preview": true,
   "publisher": "agentflow-study",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rrsudev/agent-orgchart.git"
+  },
   "icon": "media/icon.png",
   "engines": {
     "vscode": "^1.85.0"
@@ -105,6 +109,36 @@
           "type": "string",
           "default": "",
           "description": "URL opened by the 15-minute study-protocol popup ('record your steps on the study website'). Empty falls back to the placeholder baked into the app."
+        },
+        "agentFlowStudy.statusSummaries.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Generate live, human-readable status lines under each agent ('guava is debugging server-side auth errors'). When on and an API key is set, a small model summarizes recent activity; otherwise a deterministic fallback derived from tool activity is used. NOTE: with a key set, metadata about agent activity (tool names, truncated argument summaries, file basenames, todo steps) is sent to OpenRouter — disclose this at study enrollment."
+        },
+        "agentFlowStudy.statusSummaries.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "OpenRouter API key used to generate status lines. Precedence: this setting → the OPENROUTER_API_KEY environment variable → a key baked into the build at package time (study VSIX) → the deterministic (no-network) summary. Leave empty to use the build's baked key."
+        },
+        "agentFlowStudy.statusSummaries.model": {
+          "type": "string",
+          "default": "google/gemini-2.5-flash-lite",
+          "description": "OpenRouter model id used for status summaries. Pick a small, fast, cheap model — e.g. google/gemini-2.5-flash-lite, mistralai/ministral-3-3b, openai/gpt-5.1-nano, or anthropic/claude-haiku-4.5 for the best phrasing."
+        },
+        "agentFlowStudy.statusSummaries.throttleMs": {
+          "type": "number",
+          "default": 5000,
+          "description": "Minimum interval (ms) between status updates per agent. Bounds latency lag and cost."
+        },
+        "agentFlowStudy.statusSummaries.endpoint": {
+          "type": "string",
+          "default": "",
+          "description": "Override the chat-completions endpoint used for status summaries. Empty uses the OpenRouter default."
+        },
+        "agentFlowStudy.statusSummaries.sendRawText": {
+          "type": "boolean",
+          "default": false,
+          "description": "Also include a short snippet of the agent's thinking/assistant text in the summarization prompt. Off by default (metadata-only) for privacy; enabling it sends more session content to the model provider."
         }
       }
     }
@@ -119,6 +153,7 @@
     "lint": "tsc --noEmit",
     "lint:test": "tsc --noEmit --project tsconfig.test.json",
     "test": "tsx --test test/**/*.test.ts",
+    "test:status-live": "tsx scripts/status-live-check.ts",
     "vscode:uninstall": "node scripts/uninstall.js"
   },
   "devDependencies": {

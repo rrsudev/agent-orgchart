@@ -19,6 +19,7 @@ export type AgentEventType =
   | 'subagent_dispatch'
   | 'subagent_return'
   | 'permission_requested'
+  | 'agent_status'
   | 'error'
 
 export interface AgentEvent {
@@ -125,6 +126,9 @@ export type WebviewToExtensionMessage =
   | { type: 'study-session'; payload: StudySessionLifecycle }
   | { type: 'ui-interaction'; payload: InteractionRecord }
   | { type: 'resume-session'; sessionId: string }
+  | { type: 'reveal-study-data' }
+  | { type: 'package-study-data' }
+  | { type: 'status-visible'; visible: boolean }
   | { type: 'log'; level: 'info' | 'warn' | 'error'; message: string }
 
 // ─── Transcript Types (from Claude Code JSONL files) ─────────────────────────
@@ -191,6 +195,7 @@ export function emitSubagentSpawn(
   task: string,
   sessionId?: string,
   displayName?: string,
+  agentType?: string,
 ): void {
   emitter.emit({
     time: emitter.elapsed(sessionId),
@@ -200,9 +205,12 @@ export function emitSubagentSpawn(
   emitter.emit({
     time: emitter.elapsed(sessionId),
     type: 'agent_spawn',
-    // `name` is the stable identity/key; `displayName` is the friendly label
-    // (e.g. "Explore · map the event flow"). The webview shows displayName.
-    payload: { name: child, parent, task, ...(displayName ? { displayName } : {}) },
+    // `name` is the stable identity/key. `task` carries the descriptive label
+    // ("Explore · map the event flow") shown on hover / in the detail card.
+    // `agentType` is the title-cased type ("Explore") the webview folds into
+    // the neutral call-sign node label ("Guava · Explore"). `displayName` is a
+    // legacy fallback the webview only uses if it can't build a call-sign.
+    payload: { name: child, parent, task, ...(displayName ? { displayName } : {}), ...(agentType ? { agentType } : {}) },
   }, sessionId)
 }
 
@@ -225,8 +233,10 @@ export interface SubagentState {
    *  transcript line split across reads isn't dropped (see readNewFileLines). */
   fileTail: string
   agentName: string
-  /** Friendly display label (e.g. "Explore · …"); agentName stays the identity. */
+  /** Descriptive label (e.g. "Explore · …") shown on hover; agentName stays the identity. */
   displayName?: string
+  /** Title-cased agent type ("Explore") folded into the webview's call-sign node label. */
+  agentType?: string
   pendingToolCalls: Map<string, PendingToolCall>
   seenToolUseIds: Set<string>
   permissionTimer: NodeJS.Timeout | null

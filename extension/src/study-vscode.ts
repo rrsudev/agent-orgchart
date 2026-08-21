@@ -16,6 +16,7 @@
  * machine automatically.
  */
 import * as vscode from 'vscode'
+import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
 import * as crypto from 'crypto'
@@ -121,10 +122,21 @@ export async function packageStudyData(storage: StudyStorage | null): Promise<vo
   await vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: 'Agent Fruitstand: packaging study data…' },
     async () => {
-      // Flush the live sessions and rebuild the index so the zip is current.
-      storage.dispose()
+      // Flush live capture to disk and rebuild the index so the zip is current.
+      // Deliberately NOT dispose() — the participant keeps working after
+      // packaging, so ending/finalizing their live sessions here would corrupt
+      // the ongoing capture (mislabeled sessions + a truncated study slice).
+      storage.flushForPackaging()
+      // Refresh the derived SQLite index when this Node build supports it
+      // (node:sqlite, >= 22.5). The VS Code extension host ships an older Node,
+      // so this is normally skipped — the raw JSONL is the authoritative source
+      // of truth and the index can be rebuilt from it. When we CAN'T refresh it,
+      // strip any pre-existing (now-stale) index so the zip never ships
+      // misleading derived data next to the fresh raw capture.
       if (isSqliteAvailable()) {
         try { buildIndex(captureRoot) } catch (err) { log.debug('index rebuild failed:', err) }
+      } else {
+        removeStaleIndexes(packageRoot)
       }
 
       const defaultZip = vscode.Uri.file(path.join(path.dirname(packageRoot), 'agent-flow-study-data.zip'))
@@ -148,6 +160,27 @@ export async function packageStudyData(storage: StudyStorage | null): Promise<vo
   )
 }
 
+/**
+ * Delete any derived `study.sqlite` (and its -wal/-shm siblings) under the
+ * packaging root when we can't rebuild it this run. buildIndex writes the index
+ * into each per-workspace storage root (a subfolder of the packaging home), so
+ * sweep the home and its immediate children. Best-effort; the raw JSONL is the
+ * source of truth, so a missing index is always safe.
+ */
+function removeStaleIndexes(packageRoot: string): void {
+  const roots = [packageRoot]
+  try {
+    for (const e of fs.readdirSync(packageRoot, { withFileTypes: true })) {
+      if (e.isDirectory()) roots.push(path.join(packageRoot, e.name))
+    }
+  } catch { /* home not readable — nothing to sweep */ }
+  for (const root of roots) {
+    for (const suffix of ['', '-wal', '-shm']) {
+      try { fs.unlinkSync(path.join(root, 'study.sqlite' + suffix)) } catch { /* not present */ }
+    }
+  }
+}
+
 /** Best-effort cross-platform folder → zip. Returns false if it couldn't. */
 async function zipFolder(srcDir: string, destZip: string): Promise<boolean> {
   const parent = path.dirname(srcDir)
@@ -156,10 +189,13 @@ async function zipFolder(srcDir: string, destZip: string): Promise<boolean> {
     if (process.platform === 'darwin') {
       await execFileAsync('ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', srcDir, destZip])
     } else if (process.platform === 'win32') {
+      // Pass the paths as environment variables rather than interpolating them
+      // into the -Command string, so a path containing a quote or other
+      // PowerShell metacharacter can't break (or inject into) the command.
       await execFileAsync('powershell.exe', [
-        '-NoProfile', '-Command',
-        `Compress-Archive -Path "${srcDir}" -DestinationPath "${destZip}" -Force`,
-      ])
+        '-NoProfile', '-NonInteractive', '-Command',
+        'Compress-Archive -Path $env:AFS_SRC -DestinationPath $env:AFS_DEST -Force',
+      ], { env: { ...process.env, AFS_SRC: srcDir, AFS_DEST: destZip } })
     } else {
       // Linux and friends: zip the folder relative to its parent so the archive
       // contains study-storage/ as its top-level entry.

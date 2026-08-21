@@ -34,23 +34,27 @@ describe('titleCaseAgentType', () => {
 })
 
 describe('formatSubagentDisplayName', () => {
-  it('combines type and description within a ~3-word budget', () => {
-    // "General Purpose" is 2 words → 1 word of description.
+  it('combines type and the FULL description (no word truncation)', () => {
     assert.equal(
       formatSubagentDisplayName('general-purpose', 'review diff for bugs'),
-      'General Purpose · review…',
+      'General Purpose · review diff for bugs',
     )
-    // "Explore" is 1 word → 2 words of description.
     assert.equal(
       formatSubagentDisplayName('Explore', 'map the event flow'),
-      'Explore · map the…',
+      'Explore · map the event flow',
+    )
+  })
+  it('collapses whitespace/newlines in the description', () => {
+    assert.equal(
+      formatSubagentDisplayName('Explore', '  map   the\nevent flow '),
+      'Explore · map the event flow',
     )
   })
   it('type only', () => {
     assert.equal(formatSubagentDisplayName('Explore', undefined), 'Explore')
   })
-  it('description only (≤3 words)', () => {
-    assert.equal(formatSubagentDisplayName(undefined, 'map the event flow'), 'map the event…')
+  it('description only', () => {
+    assert.equal(formatSubagentDisplayName(undefined, 'map the event flow'), 'map the event flow')
   })
   it('falls back to "subagent" when nothing is available', () => {
     assert.equal(formatSubagentDisplayName(undefined, undefined), 'subagent')

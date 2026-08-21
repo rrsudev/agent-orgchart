@@ -257,6 +257,23 @@ function wirePanel(panel: VisualizerPanel): void {
         handleResumeSession(message.sessionId)
         break
 
+      case 'reveal-study-data':
+        // In-UI shortcut for the "Reveal Study Data Folder" command, so a
+        // participant can locate their capture without hunting the palette.
+        revealStudyFolder(studyStorage)
+        break
+
+      case 'package-study-data':
+        // In-UI shortcut for the "Package Study Data (Zip)" command.
+        void packageStudyData(studyStorage)
+        break
+
+      case 'status-visible':
+        // The webview's status toggle drives whether we spend credits generating
+        // live status lines. Off → the summarizer buffers but makes no calls.
+        panel.setStatusActive(message.visible)
+        break
+
       case 'log': {
         const webviewLog = createLogger('Webview')
         const logFn = message.level === 'error' ? webviewLog.error

@@ -565,6 +565,28 @@ export class StudyStorage {
     rec.finalized = true
   }
 
+  /**
+   * Flush live capture to disk WITHOUT ending anything, so a packaging zip is
+   * current while the participant keeps working. Unlike {@link dispose}, this
+   * does NOT finalize per-transcript sessions or end the active study-session
+   * slice: session.json stays truthful ("active"), currentStudySession is left
+   * intact, and later events keep teeing into the study-session events.jsonl.
+   * Use this from the "Package Study Data" command — calling dispose() there
+   * mislabels every still-running session as "completed"/"ended" and silently
+   * truncates the study-session slice for the rest of the run.
+   */
+  flushForPackaging(): void {
+    for (const [sessionId] of this.sessions) {
+      // syncClaudeSession is already self-contained (best-effort, logs its own
+      // failures); the guard is belt-and-suspenders so one bad session can't
+      // abort the flush of the others.
+      try { this.syncClaudeSession(sessionId) } catch { /* best-effort */ }
+    }
+    // Refresh the top-level manifest (session count / timestamps) so the zip's
+    // manifest matches what's on disk.
+    try { this.writeManifest() } catch { /* best-effort */ }
+  }
+
   dispose(): void {
     // Best-effort final sync of every live session so nothing is left behind.
     for (const [sessionId, rec] of this.sessions) {

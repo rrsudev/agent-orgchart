@@ -9,6 +9,8 @@ import {
   BRIDGE_INIT_MAX_RETRIES, BRIDGE_INIT_RETRY_MS, DEFAULT_DEV_PORT, NONCE_LENGTH, NONCE_CHARS,
   WEBVIEW_BG_COLOR, WEBVIEW_LOADING_TEXT, WEBVIEW_LOADING_TEXT_DIM,
 } from './constants'
+import { StatusSummarizer, DEFAULT_STATUS_MODEL, DEFAULT_STATUS_THROTTLE_MS } from './status-summarizer'
+import { BAKED_OPENROUTER_KEY, HAS_BAKED_OPENROUTER_KEY } from './baked-config'
 
 function getNonce(): string {
   const bytes = crypto.randomBytes(NONCE_LENGTH)
@@ -30,6 +32,7 @@ export class VisualizerPanel implements vscode.Disposable {
   private readonly _onCommand = new vscode.EventEmitter<WebviewToExtensionMessage>()
   private _wired = false
   private _ready = false
+  private readonly statusSummarizer: StatusSummarizer
 
   readonly onCommand = this._onCommand.event
 
@@ -45,6 +48,45 @@ export class VisualizerPanel implements vscode.Disposable {
   private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
     this.panel = panel
     this.extensionUri = extensionUri
+
+    // Live status summarizer — observes the outbound event stream and emits
+    // `agent_status` events with a short activity clause per agent. Config comes
+    // from the `agentFlowStudy.statusSummaries.*` settings; when disabled or with
+    // no API key it stays inert / uses the deterministic fallback.
+    const cfg = vscode.workspace.getConfiguration('agentFlowStudy')
+    // Key precedence: explicit setting → the operator's user env → the key baked
+    // into this build (study VSIX). The baked key is the zero-setup path for the
+    // 8 study machines; a per-machine setting/env still overrides it.
+    const apiKey = cfg.get<string>('statusSummaries.apiKey', '')
+      || process.env.OPENROUTER_API_KEY
+      || BAKED_OPENROUTER_KEY
+      || undefined
+    // When a key is baked into the build, default the feature ON so it "just
+    // works" without each participant flipping a setting — but honor an explicit
+    // user override either way.
+    const enabledInspect = cfg.inspect<boolean>('statusSummaries.enabled')
+    const enabledOverride = enabledInspect?.globalValue
+      ?? enabledInspect?.workspaceValue
+      ?? enabledInspect?.workspaceFolderValue
+    const enabled = typeof enabledOverride === 'boolean'
+      ? enabledOverride
+      : (HAS_BAKED_OPENROUTER_KEY || cfg.get<boolean>('statusSummaries.enabled', false))
+    this.statusSummarizer = new StatusSummarizer(
+      {
+        enabled,
+        // Start gated: no model calls until the webview reports its status toggle
+        // is on (see setStatusActive). Keeps credits at zero when the line is off.
+        active: false,
+        apiKey,
+        model: cfg.get<string>('statusSummaries.model', DEFAULT_STATUS_MODEL),
+        endpoint: cfg.get<string>('statusSummaries.endpoint', '') || undefined,
+        throttleMs: cfg.get<number>('statusSummaries.throttleMs', DEFAULT_STATUS_THROTTLE_MS),
+        sendRawText: cfg.get<boolean>('statusSummaries.sendRawText', false),
+      },
+      (agent, status, sessionId) => {
+        this.sendEvent({ time: Date.now(), type: 'agent_status', payload: { agent, status }, sessionId })
+      },
+    )
 
     this.panel.webview.html = this.getHtml()
 
@@ -117,7 +159,17 @@ export class VisualizerPanel implements vscode.Disposable {
 
   /** Send an agent event to the webview */
   sendEvent(event: AgentEvent): void {
+    // Observe the outbound stream to derive live per-agent status. `agent_status`
+    // events (including the ones we emit below) are ignored by the summarizer, so
+    // this can't loop.
+    this.statusSummarizer.observe(event)
     this.postMessage({ type: 'agent-event', event })
+  }
+
+  /** Gate live status generation on the webview's status toggle. Off → the
+   *  summarizer buffers activity but makes no OpenRouter calls (no credits). */
+  setStatusActive(active: boolean): void {
+    this.statusSummarizer.setActive(active)
   }
 
   /** Update connection status display */
@@ -272,6 +324,7 @@ export class VisualizerPanel implements vscode.Disposable {
 
   dispose(): void {
     VisualizerPanel.instance = undefined
+    this.statusSummarizer.dispose()
     for (const d of this.disposables) {
       d.dispose()
     }

@@ -130,6 +130,12 @@ export const WEB_FETCH_PROMPT_MAX = 200
 /** Subagent child name max */
 export const CHILD_NAME_MAX = 30
 
+/** Subagent descriptive-label max (the "Type · description" shown on hover /
+ *  in the detail card). The Task/Agent `description` field is normally a short
+ *  3-5 word phrase; this only bounds the rare case where we fall back to a long
+ *  `prompt`, so the hover stays readable. */
+export const SUBAGENT_DESC_MAX = 200
+
 /** Skill name max */
 export const SKILL_NAME_MAX = 40
 
@@ -220,16 +226,16 @@ export function titleCaseAgentType(type: string): string {
     .join(' ')
 }
 
-/** Build a subagent's friendly DISPLAY label from its type + task description,
- *  kept short (≤ ~3 words total): 'Explore · map event'. The type takes priority
- *  and the description fills the remaining word budget. Falls back to whichever
- *  piece is present. */
+/** Build a subagent's DESCRIPTIVE label from its type + task description:
+ *  'Explore · map the event flow'. The full description is kept (no word
+ *  truncation) — this string is the hover / detail-card text, not the node
+ *  label. The node label is a neutral call-sign assigned in the webview
+ *  (see web/lib/callsigns.ts `subagentCallSign`), so there's no width pressure
+ *  here. Falls back to whichever piece is present. */
 export function formatSubagentDisplayName(type?: string, description?: string): string {
   const t = type ? titleCaseAgentType(type) : ''
-  if (!description) return t || 'subagent'
-  const typeWords = t ? t.split(' ').length : 0
-  const descBudget = Math.max(1, 3 - typeWords) // always show at least one word
-  const desc = truncateWords(description, descBudget)
+  const desc = description ? description.replace(/\s+/g, ' ').trim().slice(0, SUBAGENT_DESC_MAX) : ''
+  if (!desc) return t || 'subagent'
   return t ? `${t} · ${desc}` : desc
 }
 

@@ -21,6 +21,7 @@ import {
   generateSubagentFallbackName,
   resolveSubagentChildName,
   formatSubagentDisplayName,
+  titleCaseAgentType,
 } from './constants'
 import { summarizeInput, summarizeResult, extractInputData, detectError, buildDiscovery } from './tool-summarizer'
 import { estimateTokensFromContent, estimateTokensFromText } from './token-estimator'
@@ -296,12 +297,15 @@ export class TranscriptParser {
       const subagentType = typeof block.input.subagent_type === 'string' ? block.input.subagent_type : undefined
       const description = typeof block.input.description === 'string' ? block.input.description : undefined
       const displayName = formatSubagentDisplayName(subagentType, description)
+      const agentType = subagentType ? titleCaseAgentType(subagentType) : undefined
       this.subagentChildNames.set(block.id, childName)
-      // Only emit spawn once per subagent name (file watcher may have already spawned it)
+      // Only emit spawn once per subagent name (file watcher may have already spawned it).
+      // `task` carries the descriptive label (hover text); the neutral node label is a
+      // call-sign built in the webview from `agentType`.
       const session = sessionId ? this.delegate.getSession(sessionId) : undefined
       if (!session?.spawnedSubagents.has(childName)) {
         session?.spawnedSubagents.add(childName)
-        emitSubagentSpawn(this.delegate, agentName, childName, args, sessionId, displayName)
+        emitSubagentSpawn(this.delegate, agentName, childName, displayName, sessionId, displayName, agentType)
       }
     }
 
