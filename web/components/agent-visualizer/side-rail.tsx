@@ -18,7 +18,7 @@ const RAIL_W = {
   right: { min: 288, max: 344, fraction: 0.32 },
 } as const
 
-function railWidth(layout: LayoutInfo, side: 'left' | 'right'): number {
+export function railWidth(layout: LayoutInfo, side: 'left' | 'right'): number {
   // With the rails merged there is one column and it takes the full width.
   if (!layout.sideBySide) return layout.panelWidth(9999)
   const { min, max, fraction } = RAIL_W[side]

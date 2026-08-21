@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { COLORS } from '@/lib/colors'
+import { Markdown } from '@/lib/markdown'
 import { ToolContentRenderer } from './tool-content-renderer'
 import { Icon } from './chrome'
 import type { ConversationMessage } from '@/hooks/simulation/types'
@@ -41,8 +42,8 @@ export function TranscriptMessage({ message, compact = false, searchQuery, assis
           }}
         >
           <div className="ui-2xs mb-1 font-semibold tracking-wider" style={{ color: COLORS.userLabel }}>USER</div>
-          <div style={{ color: COLORS.userText }} className="whitespace-pre-wrap break-words">
-            <HighlightText text={message.content} query={searchQuery} />
+          <div style={{ color: COLORS.userText }} className="break-words">
+            <Markdown text={message.content} query={searchQuery} />
           </div>
         </div>
       )
@@ -57,8 +58,8 @@ export function TranscriptMessage({ message, compact = false, searchQuery, assis
           }}
         >
           <div className="ui-2xs mb-1 font-semibold tracking-wider" style={{ color: COLORS.assistantLabel }}>{assistantLabel}</div>
-          <div style={{ color: COLORS.assistantText }} className="whitespace-pre-wrap break-words">
-            <HighlightText text={compact ? message.content.slice(0, 200) + (message.content.length > 200 ? '...' : '') : message.content} query={searchQuery} />
+          <div style={{ color: COLORS.assistantText }} className="break-words">
+            <Markdown text={compact ? message.content.slice(0, 200) + (message.content.length > 200 ? '...' : '') : message.content} query={searchQuery} />
           </div>
         </div>
       )

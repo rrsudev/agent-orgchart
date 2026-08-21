@@ -28,7 +28,7 @@ export type IconName =
   | 'plus' | 'external' | 'grid' | 'undo' | 'close' | 'search' | 'info'
   | 'files' | 'chat' | 'tokens' | 'play' | 'pause' | 'stop' | 'archive'
   | 'restart' | 'chevronDown' | 'chevronRight' | 'chevronLeft' | 'more'
-  | 'pencil' | 'terminal' | 'stats' | 'label' | 'fit'
+  | 'pencil' | 'terminal' | 'stats' | 'label' | 'fit' | 'download'
 
 const PATHS: Record<IconName, ReactNode> = {
   plus: <path d="M6 2.4V9.6M2.4 6h7.2" />,
@@ -55,6 +55,7 @@ const PATHS: Record<IconName, ReactNode> = {
   stats: <><path d="M2.4 9.6V6.3M6 9.6V2.4M9.6 9.6V4.8" /></>,
   label: <><path d="M2.4 2.4h4.2l3 3.6-3 3.6H2.4z" /><circle cx="4.2" cy="6" r=".55" fill="currentColor" stroke="none" /></>,
   fit: <><path d="M2.1 4.5V2.4h2.1M7.8 2.1h2.1v2.1M9.9 7.5v2.1H7.8M4.2 9.9H2.1V7.8" /></>,
+  download: <><path d="M6 1.8v5.1" /><path d="M3.9 4.8 6 6.9l2.1-2.1" /><path d="M2.4 9.6h7.2" /></>,
 }
 
 export function Icon({ name, size = 12, className }: { name: IconName; size?: number; className?: string }) {

@@ -296,23 +296,30 @@ function drawStateBadge(
  * task still lives in the detail card). Returns the absolute Y of the bottom of
  * the label block, so the caller can push the token bar below it.
  */
-function drawAgentLabel(ctx: CanvasRenderingContext2D, agent: Agent, half: number, isHovered: boolean, isMain: boolean, name: string, subtitle?: string, showSubtitle = false): number {
+/** A trailing activity ellipsis that cycles "", ".", "..", "..." so an ongoing
+ *  status reads as live. Static "…" under reduced-motion. */
+function animatedEllipsis(time: number): string {
+  if (PREFERS_REDUCED_MOTION) return '…'
+  return '.'.repeat(Math.floor(time * 2.5) % 4)
+}
+
+function drawAgentLabel(ctx: CanvasRenderingContext2D, agent: Agent, half: number, widthHalf: number, isHovered: boolean, isMain: boolean, name: string, time: number, subtitle?: string, showSubtitle = false): number {
   ctx.textAlign = 'center'
   ctx.textBaseline = 'top'
-  // Generous widths, still well inside the ~200px inter-node spacing. The goal
-  // gets a wider box + smaller type so several words fit across its two lines.
-  // Subagents render their FULL name (they have no goal subtitle to lean on, and
-  // the name — "Explore · map the event flow" — carries all the meaning), so they
-  // wrap to as many lines as needed instead of being ellipsis-truncated.
-  const nameMaxW = isMain ? half * 5 : half * 6
-  const goalMaxW = half * 7
+  // Wrap widths come from `widthHalf` — the node's STABLE half-size (no breathing
+  // or spawn-scale) — so a label sitting near a wrap threshold can't flip between
+  // one and two lines as the node breathes. `half` (animated) is used only for the
+  // vertical offset so the label still tracks the node.
+  // Subagents carry a short fixed label ("Guava · Subagent"), so they always get a
+  // single line (generous width, no ellipsis in practice). Main agents keep up to
+  // two lines for the call-sign; the full goal lives in the hover / detail card.
+  const nameMaxW = isMain ? widthHalf * 5 : widthHalf * 8
+  const goalMaxW = widthHalf * 7
   const nameLineH = 14
   const goalLineH = 10.5
-  const nameMaxLines = isMain ? 2 : 8
+  const nameMaxLines = isMain ? 2 : 1
   let y = agent.y + half + AGENT_DRAW.labelYOffset
 
-  // Primary name. Main agents cap at 2 lines (the goal subtitle / hover carry the
-  // rest); subagents render fully. Type carries hierarchy through weight + size.
   ctx.fillStyle = isHovered ? COLORS.textPrimary : COLORS.textDim
   ctx.font = `600 12px ${CANVAS_FONT.sans}`
   for (const line of wrapTextLines(ctx, name, nameMaxW, nameMaxLines)) {
@@ -327,8 +334,13 @@ function drawAgentLabel(ctx: CanvasRenderingContext2D, agent: Agent, half: numbe
     y += AGENT_DRAW.subtitleGap
     ctx.fillStyle = COLORS.textMuted
     ctx.font = `500 8.5px ${CANVAS_FONT.sans}`
-    for (const line of wrapTextLines(ctx, subtitle, goalMaxW, 2)) {
-      ctx.fillText(line, agent.x, y)
+    const lines = wrapTextLines(ctx, subtitle, goalMaxW, 2)
+    // A moving ellipsis on the last line signals ongoing activity; a finished agent
+    // gets none ("is done").
+    const dots = agent.state === 'complete' ? '' : animatedEllipsis(time)
+    for (let i = 0; i < lines.length; i++) {
+      const isLast = i === lines.length - 1
+      ctx.fillText(isLast ? lines[i] + dots : lines[i], agent.x, y)
       y += goalLineH
     }
   }
@@ -394,6 +406,9 @@ export function drawAgents(
       : agent.state === 'idle' ? Math.sin(time * ANIM.breathe.idleSpeed) * ANIM.breathe.idleAmp + 1 : 1
 
     const half = radius * NODE_DRAW.halfScale * breathe * agent.scale
+    // Stable half-size (no breathing / spawn-scale) used only for label wrap widths,
+    // so a label near a wrap threshold doesn't flip between one and two lines.
+    const widthHalf = radius * NODE_DRAW.halfScale
 
     ctx.save()
     ctx.globalAlpha = agent.opacity
@@ -408,7 +423,7 @@ export function drawAgents(
       drawSubagentGlyph(ctx, agent.x, agent.y, half, color)
     }
     drawStateBadge(ctx, agent, radius, half, color, time)
-    const labelBottom = drawAgentLabel(ctx, agent, half, isHovered, agent.isMain, label, subtitle, showSubtitles)
+    const labelBottom = drawAgentLabel(ctx, agent, half, widthHalf, isHovered, agent.isMain, label, time, subtitle, showSubtitles)
 
     // Token/context bar — user-toggleable (showTokens). The context ring was
     // removed; the bar is the only token readout now. When off, nothing is drawn.

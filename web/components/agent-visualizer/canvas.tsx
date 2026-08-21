@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useEffect, useState, useCallback } from 'react'
+import { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import { Agent, Particle, Edge, Discovery, DepthParticle } from '@/lib/agent-types'
 import type { SimulationState } from '@/hooks/simulation/types'
 import { getStateColor } from '@/lib/colors'
@@ -22,7 +22,7 @@ import {
 import { useCanvasCamera } from '@/hooks/use-canvas-camera'
 import { useCanvasInteraction } from '@/hooks/use-canvas-interaction'
 import { useLayout } from '@/lib/layout'
-import { railAnchor } from './side-rail'
+import { railAnchor, railWidth } from './side-rail'
 
 /** Respect the OS "reduce motion" setting — freezes non-essential canvas drift
  *  (parallax depth particles). Evaluated once at module load; guarded for SSR
@@ -50,6 +50,13 @@ interface CanvasProps {
   showHexGrid: boolean
   zoomToFitTrigger?: number
   pauseAutoFit?: boolean
+  /** Whether a right-rail panel (chat feed / file-attention) is open, so auto-fit
+   *  can frame the graph clear of it. Left rail is inferred from selectedAgentId. */
+  rightPanelOpen?: boolean
+  /** Full-text mode: show the world-space message pop-ups (prompt/thinking/reply
+   *  bubbles) on the canvas. Off (default) keeps the canvas quiet — the status line
+   *  carries activity — and matches the feed's compact-bubble mode. */
+  showFullText?: boolean
   onAgentClick: (agentId: string | null) => void
   onAgentHover: (agentId: string | null) => void
   onAgentDrag: (agentId: string, x: number, y: number) => void
@@ -73,7 +80,7 @@ interface CanvasProps {
 export function AgentCanvas({
   simulationRef,
   viewKey,
-  selectedAgentId, hoveredAgentId, showStats, showTokens, showSubtitles, showHexGrid, zoomToFitTrigger, pauseAutoFit,
+  selectedAgentId, hoveredAgentId, showStats, showTokens, showSubtitles, showHexGrid, zoomToFitTrigger, pauseAutoFit, rightPanelOpen, showFullText,
   onAgentClick, onAgentHover, onAgentDrag, onContextMenu, onToolCallClick, selectedToolCallId, onDiscoveryClick, selectedDiscoveryId,
   agentColors, agentNames, agentSubtitles, onAgentDoubleClick, onAgentNameClick,
 }: CanvasProps) {
@@ -85,6 +92,18 @@ export function AgentCanvas({
   const layout = useLayout()
   const layoutRef = useRef(layout)
   layoutRef.current = layout
+
+  // Screen-space keep-out for auto-fit: the top bar + bottom dock always reserve
+  // space, and each open side rail reserves its column, so the graph (and its
+  // gray sublabels) is framed clear of the panels instead of drifting under them.
+  // Memoized so the fit-transform cache only busts when the inset actually changes.
+  const leftPanelOpen = selectedAgentId != null
+  const viewportInset = useMemo(() => ({
+    top: layout.railTop,
+    bottom: layout.railBottom,
+    left: layout.sideBySide && leftPanelOpen ? railWidth(layout, 'left') + layout.gutter : 0,
+    right: layout.sideBySide && rightPanelOpen ? railWidth(layout, 'right') + layout.gutter : 0,
+  }), [layout, leftPanelOpen, rightPanelOpen])
   const animationRef = useRef<number>(0)
   const timeRef = useRef(0)
   const simTimeRef = useRef(0)
@@ -128,7 +147,7 @@ export function AgentCanvas({
     particles: sim.particles, edges: sim.edges, discoveries: sim.discoveries,
     selectedAgentId, hoveredAgentId, showStats, showTokens, showSubtitles, showHexGrid,
     selectedToolCallId, selectedDiscoveryId,
-    simTime: sim.currentTime, pauseAutoFit, dimensions,
+    simTime: sim.currentTime, pauseAutoFit, dimensions, viewportInset, showFullText,
     onAgentDrag, onAgentClick, onAgentHover, onContextMenu,
     onToolCallClick, onDiscoveryClick, onAgentDoubleClick, onAgentNameClick,
     agentColors, agentNames, agentSubtitles,
@@ -230,7 +249,7 @@ export function AgentCanvas({
         selectedAgentId, hoveredAgentId, showStats, showTokens, showSubtitles, showHexGrid,
         selectedToolCallId, selectedDiscoveryId,
         simTime, pauseAutoFit, dimensions, onAgentDrag,
-        agentColors, agentNames, agentSubtitles,
+        agentColors, agentNames, agentSubtitles, showFullText,
         isDragging,
       } = drawPropsRef.current
       const transform = transformRef.current
@@ -308,7 +327,8 @@ export function AgentCanvas({
       drawToolCalls(ctx, toolCalls, timeRef.current, selectedToolCallId)
       drawDiscoveries(ctx, discoveries, agents, selectedDiscoveryId)
       drawAgents(ctx, agents, selectedAgentId, hoveredAgentId, showStats, timeRef.current, agentColors, agentNames, agentSubtitles, showTokens, showSubtitles)
-      drawMessageBubblesWorld(ctx, agents, simTimeRef.current)
+      // Message pop-ups (prompt/thinking/reply bubbles) only in full-text mode.
+      if (showFullText) drawMessageBubblesWorld(ctx, agents, simTimeRef.current)
       drawParticles(ctx, particles, edgeMap, agents, toolCalls, timeRef.current)
       drawEffects(ctx, effectsRef.current)
 

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react'
 import { COLORS } from '@/lib/colors'
+import { Markdown } from '@/lib/markdown'
 import { Z } from '@/lib/agent-types'
 
 /**
@@ -70,7 +71,7 @@ export function AgentHoverTooltip({ text }: { text: string | null }) {
         wordBreak: 'break-word',
       }}
     >
-      {text}
+      <Markdown text={text} />
     </div>
   )
 }

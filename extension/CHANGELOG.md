@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.6.0
+
+- **Locate and export your study data from the panel.** A new **Study data** menu in the top bar (folds into the overflow menu on narrow widths) reveals the local capture folder or packages it into a zip to send to the researchers — the same actions as the command palette, now one click away.
+- **Packaging no longer interrupts capture.** "Package Study Data (Zip)" used to end and mislabel the in-progress session (marking still-running sessions "completed" and truncating the study-session slice) because it flushed via the shutdown path. It now flushes non-destructively, so you can package data mid-study and keep working with the capture intact.
+- **Safer transcript rendering.** Links in rendered message/prompt text are now restricted to `http`/`https`/`mailto`; anything else (e.g. a `javascript:`/`data:` URL echoed from a page or file an agent read) renders as plain text instead of a live link.
+- **Packaging hardening.** The zip step no longer ships a stale SQLite index when it can't be rebuilt on the host's Node (raw JSONL stays the source of truth), and Windows zipping no longer breaks on capture paths containing quotes or other special characters.
+- **Accurate privacy disclosure.** The README now spells out the optional OpenRouter status-line egress (activity metadata, including truncated command text) and how to disable it, instead of implying nothing ever leaves the machine.
+
 ## 1.5.0
 
 - **Live agent status lines.** Each agent now carries a short, glanceable status under its name — "guava is debugging server-side auth", "apple is writing checkout tests" — that updates as the agent works. Statuses are generated from the agent's recent activity by a small, fast model via OpenRouter (default `google/gemini-2.5-flash-lite`), with a deterministic, on-device fallback ("editing draw-agents.ts", "searching the code") when the model is off or unreachable. Output is standardized to a very short "[verb-ing] [what]" format.

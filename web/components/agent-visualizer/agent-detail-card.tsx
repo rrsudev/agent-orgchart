@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { CARD, type AgentState } from '@/lib/agent-types'
 import { COLORS, getStateColor } from '@/lib/colors'
+import { Markdown } from '@/lib/markdown'
 import { formatTokens, formatModelName } from '@/lib/utils'
 import { GlassCard } from './glass-card'
 import { PanelHeader, ProgressBar } from './shared-ui'
@@ -25,6 +26,10 @@ interface AgentDetailCardProps {
     toolCalls: number
     timeAlive: number
     currentTool?: string
+    /** Live activity clause ("debugging server-side auth errors"). */
+    statusLine?: string
+    /** Internal harness agent type ("Explore", "General Purpose", …). */
+    agentType?: string
     /** Full task / goal text for this agent (untruncated). */
     task?: string
   }
@@ -120,6 +125,11 @@ export function AgentDetailCard({
               {formatModelName(agent.model)}
             </span>
           )}
+          {agent.statusLine && (
+            <span className="ui-2xs truncate" style={{ color: COLORS.textMuted }}>
+              {agent.statusLine}
+            </span>
+          )}
         </div>
       </PanelHeader>
 
@@ -142,6 +152,7 @@ export function AgentDetailCard({
           <span className="ui-num">{agent.toolCalls} tools</span>
           <span className="ui-num">{agent.timeAlive.toFixed(1)}s alive</span>
           <span className="capitalize" style={{ color: stateColor }}>{agent.state}</span>
+          {agent.agentType && <span style={{ color: COLORS.textMuted }}>{agent.agentType}</span>}
         </div>
 
         {/* Full task / goal — the node label only shows a 1-2 word fragment, so the
@@ -150,7 +161,7 @@ export function AgentDetailCard({
           <div className="mb-3">
             <div className="ui-2xs mb-1" style={{ color: COLORS.textMuted }}>Task</div>
             <div
-              className="panel-scroll ui-xs leading-snug rounded px-2 py-1.5 whitespace-pre-wrap break-words"
+              className="panel-scroll ui-xs leading-snug rounded px-2 py-1.5 break-words"
               style={{
                 color: COLORS.textDim,
                 background: COLORS.toolIndicatorBg,
@@ -158,7 +169,7 @@ export function AgentDetailCard({
                 maxHeight: layout.short ? TASK_MAX_H_SHORT : TASK_MAX_H,
               }}
             >
-              {agent.task}
+              <Markdown text={agent.task} />
             </div>
           </div>
         )}

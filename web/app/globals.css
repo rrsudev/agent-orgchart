@@ -273,6 +273,12 @@
 .rail-slot:empty {
   display: none;
 }
+/* Rail panels (chat feed, file-attention, detail card, legend) fully occlude the
+   canvas behind them, so world-space node labels and the gray status/goal
+   subtitles can't bleed through the translucent glass. */
+.rail-slot .glass-card {
+  background: rgb(247, 247, 249);
+}
 .rail-slot.is-bottom {
   margin-top: auto;
 }

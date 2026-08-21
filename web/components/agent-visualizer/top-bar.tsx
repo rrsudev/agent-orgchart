@@ -172,14 +172,21 @@ export interface TopBarProps {
   agentCount: number
   // Panel toggles
   showFileAttention: boolean
-  showChat: boolean
-  /** Whether the per-node token bar is shown (user preference). */
-  showTokens: boolean
+  /** Whether the conversation feed shows full message text (vs short bubbles). */
+  showFullText: boolean
+  /** Whether the per-agent status / sublabel line is shown (user preference). */
+  showSubtitles: boolean
   onToggleFiles: () => void
-  onToggleChat: () => void
-  onToggleTokens: () => void
+  onToggleFullText: () => void
+  onToggleSubtitles: () => void
   /** Return to the study platform (opens gamejam-progress in the browser). */
   onReturnToStudy: () => void
+  /** Reveal the local study-capture folder in the OS file explorer (VS Code
+   *  only — omitted when not running in the extension host). */
+  onRevealStudyData?: () => void
+  /** Package the captured study data into a zip to send to researchers (VS Code
+   *  only). */
+  onExportStudyData?: () => void
 }
 
 export const TopBar = memo(function TopBar({
@@ -188,9 +195,9 @@ export const TopBar = memo(function TopBar({
   archivedSessions, archivedDisplay, onReopenSession, onResumeSession,
   isVSCode, connectionStatus,
   agentCount,
-  showFileAttention, showChat, showTokens,
-  onToggleFiles, onToggleChat, onToggleTokens,
-  onReturnToStudy,
+  showFileAttention, showFullText, showSubtitles,
+  onToggleFiles, onToggleFullText, onToggleSubtitles,
+  onReturnToStudy, onRevealStudyData, onExportStudyData,
 }: TopBarProps) {
   const layout = useLayout()
   const { narrow, compact, gutter, registerChrome } = layout
@@ -278,9 +285,40 @@ export const TopBar = memo(function TopBar({
   const renderToggles = (dots: boolean) => (
     <ControlGroup label="View toggles">
       <ToggleChip active={showFileAttention} onClick={onToggleFiles} label="File-attention panel" icon="files" showDot={dots}>Files</ToggleChip>
-      <ToggleChip active={showChat} onClick={onToggleChat} label="Conversation panel" icon="chat" showDot={dots}>Chat</ToggleChip>
-      <ToggleChip active={showTokens} onClick={onToggleTokens} label="Per-node token bar" icon="tokens" showDot={dots}>Tokens</ToggleChip>
+      <ToggleChip active={showFullText} onClick={onToggleFullText} label="Show full message text in the conversation feed (off = short bubbles)" icon="chat" showDot={dots}>Full text</ToggleChip>
+      <ToggleChip active={showSubtitles} onClick={onToggleSubtitles} label="Per-agent status line (e.g. “guava is …”)" icon="label" showDot={dots}>Status</ToggleChip>
     </ControlGroup>
+  )
+
+  // Study-data actions (VS Code only). Wrapped in a small menu so locating and
+  // exporting the local capture is always one click away, without hunting the
+  // command palette. Only rendered when the host wired the handlers.
+  const hasStudyData = !!(onRevealStudyData || onExportStudyData)
+  const renderStudyDataItems = (close: () => void) => (
+    <>
+      {onRevealStudyData && (
+        <MenuItem icon="files" onClick={() => { onRevealStudyData(); close() }} title="Open the local study-capture folder in your file explorer">
+          Reveal data folder
+        </MenuItem>
+      )}
+      {onExportStudyData && (
+        <MenuItem icon="archive" onClick={() => { onExportStudyData(); close() }} title="Package the captured study data into a zip to send to the researchers">
+          Export data (zip)
+        </MenuItem>
+      )}
+    </>
+  )
+  const studyDataMenu = hasStudyData && (
+    <MenuSurface
+      label="Study data"
+      trigger={(props) => (
+        <ChromeButton icon="archive" iconOnly={studyIconOnly} {...props}>
+          Study data
+        </ChromeButton>
+      )}
+    >
+      {(close) => renderStudyDataItems(close)}
+    </MenuSurface>
   )
 
   return (
@@ -343,6 +381,12 @@ export const TopBar = memo(function TopBar({
                       })}
                     </>
                   )}
+                  {hasStudyData && (
+                    <>
+                      <MenuSectionLabel>Study data</MenuSectionLabel>
+                      {renderStudyDataItems(close)}
+                    </>
+                  )}
                   <MenuItem icon="external" onClick={() => { onReturnToStudy(); close() }} title="Return to the study platform (opens in your browser)">
                     Study platform
                   </MenuItem>
@@ -361,6 +405,7 @@ export const TopBar = memo(function TopBar({
               </span>
             )}
             {renderToggles(showToggleDots)}
+            {studyDataMenu}
             <ChromeButton
               icon="external"
               onClick={onReturnToStudy}

@@ -34,7 +34,15 @@ export interface Agent {
   /** Model ID last reported for this agent (agent_spawn / model_detected).
    *  Drives context-window sizing and the per-family cost rate. */
   model?: string
+  /** Internal harness agent type ("Explore", "General Purpose", …). Kept off the
+   *  node label (neutral "Callsign · Subagent" is shown instead) but surfaced
+   *  quietly in the detail card so the information isn't lost. */
+  agentType?: string
   currentTool?: string
+  /** Live, human-readable activity clause ("debugging server-side auth errors").
+   *  Rendered as the dim status line under the name, prefixed with the call-sign
+   *  ("guava is …"). Produced by the extension's status summarizer. */
+  statusLine?: string
   task?: string
   spawnTime: number
   completeTime?: number
@@ -161,6 +169,7 @@ export interface SimulationEvent {
     | 'subagent_dispatch'
     | 'subagent_return'
     | 'permission_requested'
+    | 'agent_status'
   payload: Record<string, unknown>
   sessionId?: string
 }

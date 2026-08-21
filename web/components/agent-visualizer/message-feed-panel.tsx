@@ -36,6 +36,9 @@ interface MessageFeedPanelProps {
   /** Controlled sub-tab: Global (full session transcript) vs Active (one agent). */
   mode: Mode
   onModeChange: (mode: Mode) => void
+  /** When false (default), messages render as short truncated bubbles; when true,
+   *  the complete message text is shown. Driven by the top-bar "Full text" toggle. */
+  fullText?: boolean
 }
 
 /**
@@ -56,6 +59,7 @@ export function MessageFeedPanel({
   onOpenChange,
   mode,
   onModeChange,
+  fullText = false,
 }: MessageFeedPanelProps) {
   const logRef = useRef<HTMLDivElement>(null)
   const agentsRef = useRef(agents)
@@ -267,7 +271,7 @@ export function MessageFeedPanel({
                             {agent?.name ?? msg.agentId}
                           </button>
                         )}
-                        <TranscriptMessage message={msg} searchQuery={searchQuery} assistantLabel={labelFor(agent)} />
+                        <TranscriptMessage message={msg} compact={!fullText} searchQuery={searchQuery} assistantLabel={labelFor(agent)} />
                       </div>
                     )
                   })}
@@ -286,7 +290,7 @@ export function MessageFeedPanel({
               <EmptyHint text="No messages yet" />
             ) : (
               activeConversation.map((msg) => (
-                <TranscriptMessage key={msg.id} message={msg} assistantLabel={labelFor(threadAgent)} />
+                <TranscriptMessage key={msg.id} message={msg} compact={!fullText} assistantLabel={labelFor(threadAgent)} />
               ))
             )}
           </div>

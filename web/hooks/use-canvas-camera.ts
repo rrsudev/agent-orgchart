@@ -20,6 +20,9 @@ interface CameraOptions {
     dimensions: { width: number; height: number }
     selectedAgentId: string | null
     pauseAutoFit?: boolean
+    /** Screen-space keep-out (top bar, bottom dock, open side rails) so auto-fit
+     *  frames the graph clear of the panels. */
+    viewportInset?: { top: number; bottom: number; left: number; right: number }
     isDragging: boolean
   }>
   simTimeRef: MutableRefObject<number>
@@ -83,8 +86,9 @@ export function useCanvasCamera({
     toolCalls: Map<string, ToolCallNode> | null
     discoveries: Discovery[] | null
     selectedAgentId: string | null
+    viewportInset: { top: number; bottom: number; left: number; right: number } | undefined
     result: Transform | null
-  }>({ agents: null, toolCalls: null, discoveries: null, selectedAgentId: null, result: null })
+  }>({ agents: null, toolCalls: null, discoveries: null, selectedAgentId: null, viewportInset: undefined, result: null })
 
   // Initialize transform centered on first agents
   useEffect(() => {
@@ -110,16 +114,19 @@ export function useCanvasCamera({
   }, [])
 
   const computeFitTransform = useCallback((): Transform | null => {
-    const { agents, toolCalls, discoveries, dimensions, selectedAgentId } = drawPropsRef.current
+    const { agents, toolCalls, discoveries, dimensions, selectedAgentId, viewportInset } = drawPropsRef.current
     if (agents.size === 0) return null
 
     // Return cached result if inputs haven't changed (reference equality —
-    // React creates new Map/array objects on state updates, so same ref = same data)
+    // React creates new Map/array objects on state updates, so same ref = same data.
+    // viewportInset is memoized in the canvas, so its ref only changes when a
+    // panel opens/closes or the layout resizes — busting the cache to re-frame.)
     const cache = fitCacheRef.current
     if (cache.agents === agents
       && cache.toolCalls === toolCalls
       && cache.discoveries === discoveries
-      && cache.selectedAgentId === selectedAgentId) {
+      && cache.selectedAgentId === selectedAgentId
+      && cache.viewportInset === viewportInset) {
       return cache.result
     }
 
@@ -173,7 +180,7 @@ export function useCanvasCamera({
       }
     }
     if (minX === Infinity) {
-      fitCacheRef.current = { agents, toolCalls, discoveries, selectedAgentId, result: null }
+      fitCacheRef.current = { agents, toolCalls, discoveries, selectedAgentId, viewportInset, result: null }
       return null
     }
     const padding = ANIM.viewportPadding
@@ -181,13 +188,21 @@ export function useCanvasCamera({
     const boundsH = maxY - minY + padding * 2
     const centerX = (minX + maxX) / 2
     const centerY = (minY + maxY) / 2
-    const scale = Math.min(dimensions.width / boundsW, dimensions.height / boundsH, 2)
+    // Frame within the un-paneled area: subtract the side-rail / chrome insets so
+    // the graph (and its gray sublabels) is centered clear of the panels. Falls
+    // back to the full canvas when no inset is supplied.
+    const inset = viewportInset ?? { top: 0, bottom: 0, left: 0, right: 0 }
+    const availW = Math.max(1, dimensions.width - inset.left - inset.right)
+    const availH = Math.max(1, dimensions.height - inset.top - inset.bottom)
+    const screenCenterX = inset.left + availW / 2
+    const screenCenterY = inset.top + availH / 2
+    const scale = Math.min(availW / boundsW, availH / boundsH, 2)
     const result = {
-      x: dimensions.width / 2 - centerX * scale,
-      y: dimensions.height / 2 - centerY * scale,
+      x: screenCenterX - centerX * scale,
+      y: screenCenterY - centerY * scale,
       scale,
     }
-    fitCacheRef.current = { agents, toolCalls, discoveries, selectedAgentId, result }
+    fitCacheRef.current = { agents, toolCalls, discoveries, selectedAgentId, viewportInset, result }
     return result
   }, [getDescendantIds, drawPropsRef, simTimeRef])
 

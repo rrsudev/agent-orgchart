@@ -5,8 +5,33 @@ import {
 } from '@/lib/agent-types'
 import { COLORS } from '@/lib/colors'
 import { AGENT_SPAWN_DISTANCE } from '@/lib/canvas-constants'
+import { subagentCallSign } from '@/lib/callsigns'
+import { AGENT_KEY_SEP } from '@/hooks/use-agent-colors'
 import { pushTimelineBlock, type ProcessEventContext, type MutableEventState } from './process-event'
 import { edgeId, asString, asBoolean } from './types'
+
+/** Session prefix of a namespaced agent id (parallel view), or null in a
+ *  single-session view where ids aren't namespaced. */
+function sessionPrefix(id: string): string | null {
+  return id.includes(AGENT_KEY_SEP) ? id.split(AGENT_KEY_SEP)[0] : null
+}
+
+/** Neutral, non-prescriptive node label for a subagent: a per-session call-sign
+ *  folded with a fixed "Subagent" role — "Guava · Subagent". The internal agent
+ *  type ("Explore", "General Purpose", …) is intentionally NOT shown here (it read
+ *  as prescriptive and leaked harness terms); it's still carried on `agent.task` /
+ *  the detail card. The index is this subagent's spawn order within its session
+ *  (count of subagents already present), so names stay distinct and replay-stable.
+ *  The live activity ("guava is …") rides the status line under this label. */
+function subagentNodeName(id: string, agents: MutableEventState['agents']): string {
+  const sid = sessionPrefix(id)
+  let index = 0
+  for (const a of agents.values()) {
+    if (!a.isMain && sessionPrefix(a.id) === sid) index++
+  }
+  const callSign = subagentCallSign(index)
+  return `${callSign} · Subagent`
+}
 
 export function handleAgentSpawn(
   payload: Record<string, unknown>,
@@ -15,11 +40,12 @@ export function handleAgentSpawn(
   ctx: ProcessEventContext,
 ): void {
   const name = asString(payload.name)
-  // Identity (`name`) may be session-namespaced in the parallel view; the visible
-  // label comes from `displayName` when present so nodes read cleanly.
+  // Identity (`name`) may be session-namespaced in the parallel view. Main agents
+  // read from `displayName`; subagents get a neutral call-sign label built below.
   const displayName = asString(payload.displayName, name)
   const parentId = typeof payload.parent === 'string' ? payload.parent : undefined
   const isMain = asBoolean(payload.isMain)
+  const agentType = typeof payload.agentType === 'string' ? payload.agentType : undefined
   const task = typeof payload.task === 'string' ? payload.task : undefined
   const model = typeof payload.model === 'string' ? payload.model : undefined
   const runtime = payload.runtime === 'codex' ? 'codex' as const : undefined
@@ -83,8 +109,13 @@ export function handleAgentSpawn(
     }
   }
 
+  // Main agents keep the extension label (a session call-sign is layered on in
+  // index.tsx); subagents get a neutral call-sign node label here at the source,
+  // so every surface that reads `agent.name` (canvas, panels, feed) stays consistent.
+  const resolvedName = isMain ? displayName : subagentNodeName(name, state.agents)
+
   const agent: Agent = {
-    id: name, name: displayName, state: 'idle',
+    id: name, name: resolvedName, state: 'idle',
     parentId: parentId || null,
     tokensUsed: 0, tokensMax: ctx.getContextWindowSize(model),
     contextBreakdown: emptyContextBreakdown(),
@@ -93,6 +124,7 @@ export function handleAgentSpawn(
     pinned: false, isMain,
     ...(runtime ? { runtime } : {}),
     ...(model ? { model } : {}),
+    ...(agentType ? { agentType } : {}),
     task,
     spawnTime: currentTime,
     opacity: 0, scale: 0.3,
@@ -107,7 +139,7 @@ export function handleAgentSpawn(
   const timelineEntry: TimelineEntry = {
     id: `timeline-${name}`,
     agentId: name,
-    agentName: displayName,
+    agentName: resolvedName,
     startTime: currentTime,
     blocks: [],
   }
@@ -204,6 +236,25 @@ export function handleModelDetected(
       ...agent,
       model,
       tokensMax: ctx.getContextWindowSize(model),
+    })
+  }
+}
+
+/** Live, human-readable activity clause for an agent — the "guava is …" status
+ *  line under the node label. The extension produces a short lowercase clause
+ *  ("debugging server-side auth errors"); the call-sign prefix is added at render
+ *  time (index.tsx) since only the web side knows the assigned call-sign. */
+export function handleAgentStatus(
+  payload: Record<string, unknown>,
+  state: MutableEventState,
+): void {
+  const agentName = asString(payload.agent)
+  const status = asString(payload.status).trim()
+  const agent = state.agents.get(agentName)
+  if (agent && agent.state !== 'complete') {
+    state.agents.set(agentName, {
+      ...agent,
+      statusLine: status || undefined,
     })
   }
 }

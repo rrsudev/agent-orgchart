@@ -173,6 +173,26 @@ class VSCodeBridge {
     this.postToExtension({ type: 'resume-session', sessionId })
   }
 
+  /** Ask the host to reveal this workspace's study-capture folder in the OS file
+   *  explorer. No-op outside VS Code. */
+  revealStudyData(): void {
+    this.postToExtension({ type: 'reveal-study-data' })
+  }
+
+  /** Ask the host to package the captured study data into a zip to send to the
+   *  researchers (runs the same flow as the "Package Study Data" command).
+   *  No-op outside VS Code. */
+  packageStudyData(): void {
+    this.postToExtension({ type: 'package-study-data' })
+  }
+
+  /** Tell the host whether the per-agent status line is currently visible. The
+   *  host gates OpenRouter status calls on this, so credits aren't spent while
+   *  the toggle is off. No-op outside VS Code. */
+  setStatusVisible(visible: boolean): void {
+    this.postToExtension({ type: 'status-visible', visible })
+  }
+
   private postToExtension(message: Record<string, unknown>): void {
     if (this._isVSCode && typeof window !== 'undefined') {
       // When inside VS Code iframe, post to parent (the webview frame)

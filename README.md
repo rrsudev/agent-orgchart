@@ -5,9 +5,22 @@ they branch, work, and hand off — right inside your editor. Point it at a live
 session and the run stops being a wall of scrolling text: you get an interactive
 map of who spawned whom, which tools fired, and where the work is going.
 
-This is a research build. It runs entirely on your machine, keeps a local copy
-of the sessions you run while it's open, and never sends anything anywhere on its
-own.
+This is a research build. It runs on your machine and keeps a local copy of the
+sessions you run while it's open. Captured session data is **never uploaded
+automatically** — you send it to the researchers yourself with the **Package
+Study Data (Zip)** command.
+
+The one exception is the optional **live status lines** under each agent
+("guava is debugging server-side auth"). When this feature is on — it ships
+**enabled** in the study build — a small amount of *activity metadata* is sent to
+[OpenRouter](https://openrouter.ai) to phrase the status: tool names, truncated
+argument summaries (which include the first ~80 characters of a shell command),
+Grep/Glob patterns, and TodoWrite steps. Raw file contents and the agent's
+thinking/assistant text are **not** sent unless you explicitly enable
+`agentFlowStudy.statusSummaries.sendRawText`. This egress is disclosed in your
+study consent; to disable it entirely, set
+`agentFlowStudy.statusSummaries.enabled` to `false` (the status line then falls
+back to an on-device, no-network summary).
 
 ---
 
@@ -18,7 +31,7 @@ compatible editor — Cursor, Windsurf, 1.85+).
 
 - **From the editor:** Extensions view → `⋯` menu → **Install from VSIX…** → pick
   the `.vsix` file.
-- **From the CLI:** `code --install-extension agent-flow-study-1.3.0.vsix`
+- **From the CLI:** `code --install-extension agent-flow-study-1.6.0.vsix`
 
 ## Use it
 

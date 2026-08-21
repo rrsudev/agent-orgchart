@@ -30,6 +30,7 @@ const NORMAL_MOCK_SCENARIO: SimulationEvent[] = [
   { time: 0.4, type: 'context_update', payload: { agent: 'orchestrator', tokens: 2200, breakdown: { systemPrompt: 1500, userMessages: 700, toolResults: 0, reasoning: 0, subagentResults: 0 } } },
   { time: 1.0, type: 'message', payload: { agent: 'orchestrator', role: 'thinking', content: 'This is a multi-part task: refactor payments, add Stripe + PayPal, webhooks, and tests. I should start by understanding the existing payment code before planning the implementation.' } },
   { time: 2.5, type: 'message', payload: { agent: 'orchestrator', content: 'I\'ll analyze the codebase and plan the payment system refactoring. Let me start by understanding the current structure.' } },
+  { time: 2.6, type: 'agent_status', payload: { agent: 'orchestrator', status: 'mapping the payment codebase' } },
   { time: 3.0, type: 'context_update', payload: { agent: 'orchestrator', tokens: 3000, breakdown: { systemPrompt: 1500, userMessages: 700, toolResults: 0, reasoning: 800, subagentResults: 0 } } },
 
   // ── Phase 1: Codebase Exploration ─────────────────────────────────────────
@@ -61,15 +62,19 @@ const NORMAL_MOCK_SCENARIO: SimulationEvent[] = [
     ]
   } } },
   { time: 8.2, type: 'tool_call_end', payload: { agent: 'orchestrator', tool: 'TodoWrite', result: 'Todos updated — 8 items', tokenCost: 80 } },
+  { time: 8.3, type: 'agent_status', payload: { agent: 'orchestrator', status: 'researching Stripe & PayPal APIs' } },
 
   // ── Phase 3: Parallel Research via Subagents (thinking — planning delegation)
   { time: 9.7, type: 'message', payload: { agent: 'orchestrator', content: 'Dispatching agents for parallel research and schema analysis...' } },
   { time: 9.9, type: 'subagent_dispatch', payload: { parent: 'orchestrator', child: 'explore-agent', task: 'Deep-dive into payment flow and DB schema' } },
   { time: 9.9, type: 'subagent_dispatch', payload: { parent: 'orchestrator', child: 'research-agent', task: 'Research Stripe & PayPal API patterns' } },
-  { time: 10.2, type: 'agent_spawn', payload: { name: 'explore-agent', parent: 'orchestrator', task: 'Analyze payment flow and database schema' } },
-  { time: 10.2, type: 'agent_spawn', payload: { name: 'research-agent', parent: 'orchestrator', task: 'Research Stripe & PayPal integration patterns' } },
+  { time: 10.2, type: 'agent_spawn', payload: { name: 'explore-agent', parent: 'orchestrator', agentType: 'Explore', task: 'Explore · analyze payment flow and database schema' } },
+  { time: 10.2, type: 'agent_spawn', payload: { name: 'research-agent', parent: 'orchestrator', agentType: 'General Purpose', task: 'General Purpose · research Stripe & PayPal integration patterns' } },
   { time: 10.5, type: 'context_update', payload: { agent: 'explore-agent', tokens: 1800, breakdown: { systemPrompt: 1400, userMessages: 400, toolResults: 0, reasoning: 0, subagentResults: 0 } } },
   { time: 10.5, type: 'context_update', payload: { agent: 'research-agent', tokens: 1800, breakdown: { systemPrompt: 1400, userMessages: 400, toolResults: 0, reasoning: 0, subagentResults: 0 } } },
+
+  { time: 10.6, type: 'agent_status', payload: { agent: 'explore-agent', status: 'reading the payment data model' } },
+  { time: 10.6, type: 'agent_status', payload: { agent: 'research-agent', status: 'researching Stripe payment patterns' } },
 
   // explore-agent: reads model file (1.5s initial thinking)
   { time: 12.0, type: 'tool_call_start', payload: { agent: 'explore-agent', tool: 'Read', args: 'src/models/payment.model.ts', inputData: { file_path: 'src/models/payment.model.ts' } } },
@@ -139,7 +144,7 @@ const NORMAL_MOCK_SCENARIO: SimulationEvent[] = [
 
   // ── Phase 5: Testing ──────────────────────────────────────────────────────
   { time: 33.5, type: 'subagent_dispatch', payload: { parent: 'orchestrator', child: 'test-runner', task: 'Write and run integration tests for payment adapters and webhooks' } },
-  { time: 33.8, type: 'agent_spawn', payload: { name: 'test-runner', parent: 'orchestrator', task: 'Write and run payment integration tests' } },
+  { time: 33.8, type: 'agent_spawn', payload: { name: 'test-runner', parent: 'orchestrator', agentType: 'General Purpose', task: 'General Purpose · write and run payment integration tests' } },
   { time: 34.0, type: 'context_update', payload: { agent: 'test-runner', tokens: 2000, breakdown: { systemPrompt: 1400, userMessages: 600, toolResults: 0, reasoning: 0, subagentResults: 0 } } },
 
   // Write test files (1.5s initial thinking, then chain immediately)

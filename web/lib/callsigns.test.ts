@@ -1,6 +1,32 @@
 import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
-import { assignCallSigns, resolveSessionName, CALLSIGNS } from './callsigns'
+import { assignCallSigns, resolveSessionName, CALLSIGNS, subagentCallSign, SUBAGENT_CALLSIGNS } from './callsigns'
+
+// ─── the fruit pools: unique, disjoint, ~50 total ─────────────────────────────
+
+test('each pool has no duplicate fruits', () => {
+  assert.equal(new Set(CALLSIGNS).size, CALLSIGNS.length)
+  assert.equal(new Set(SUBAGENT_CALLSIGNS).size, SUBAGENT_CALLSIGNS.length)
+})
+
+test('the session and subagent pools are disjoint', () => {
+  const subagent = new Set<string>(SUBAGENT_CALLSIGNS)
+  const shared = CALLSIGNS.filter((c) => subagent.has(c))
+  assert.deepEqual(shared, [])
+})
+
+test('the two pools together provide ~50 fruit presets', () => {
+  const total = CALLSIGNS.length + SUBAGENT_CALLSIGNS.length
+  assert.ok(total >= 45 && total <= 55, `expected ~50 presets, got ${total}`)
+})
+
+test('no colour-word fruits leak into either pool', () => {
+  // A call-sign that reads as a colour would clash with the per-agent identity
+  // colour, so these are intentionally excluded from both pools.
+  const colourFruits = ['Cherry', 'Orange', 'Lime', 'Lemon', 'Plum', 'Peach', 'Apricot', 'Tangerine']
+  const all: readonly string[] = [...CALLSIGNS, ...SUBAGENT_CALLSIGNS]
+  for (const c of colourFruits) assert.ok(!all.includes(c), `${c} is a colour word and must not be a call-sign`)
+})
 
 // ─── assignCallSigns: distinctness ───────────────────────────────────────────
 
@@ -52,6 +78,26 @@ test('more sessions than call-signs stay distinct via suffixes', () => {
   const m = assignCallSigns(ids, new Map())
   assert.equal(m.size, ids.length)
   assert.equal(new Set(m.values()).size, ids.length)
+})
+
+// ─── subagentCallSign: ordered, distinct, wraps past the pool ─────────────────
+
+test('subagent call-signs are the pool words in spawn order', () => {
+  assert.equal(subagentCallSign(0), 'Guava')
+  assert.equal(subagentCallSign(0), SUBAGENT_CALLSIGNS[0])
+  assert.equal(subagentCallSign(1), SUBAGENT_CALLSIGNS[1])
+})
+
+test('subagent call-signs wrap with a numeric suffix past the pool', () => {
+  const n = SUBAGENT_CALLSIGNS.length
+  assert.equal(subagentCallSign(n), `${SUBAGENT_CALLSIGNS[0]} 2`)
+  assert.equal(subagentCallSign(n + 1), `${SUBAGENT_CALLSIGNS[1]} 2`)
+  assert.equal(subagentCallSign(2 * n), `${SUBAGENT_CALLSIGNS[0]} 3`)
+})
+
+test('subagent call-signs are distinct across the whole pool', () => {
+  const names = Array.from({ length: SUBAGENT_CALLSIGNS.length }, (_, i) => subagentCallSign(i))
+  assert.equal(new Set(names).size, SUBAGENT_CALLSIGNS.length)
 })
 
 // ─── resolveSessionName: name precedence + goal context ───────────────────────

@@ -1,7 +1,7 @@
 /**
  * Value-neutral session "call-signs".
  *
- * Each open session gets a short, distinct handle (Apple, Mango, Waffle, …)
+ * Each open session gets a short, distinct handle (Apple, Mango, Melon, …)
  * instead of a truncated goal fragment. Call-signs are deliberately
  * NON-PRESCRIPTIVE: they identify a session without telling the viewer how to
  * think about what its agent is doing — which matters for the study this tool
@@ -9,20 +9,57 @@
  * The session's real goal still travels alongside as secondary context (a dim
  * subtitle on the node, and the tab tooltip) — see {@link resolveSessionName}.
  *
- * The word list is curated to be:
- *  - common + easy to say, so it stays memorable across many open tabs;
+ * The pool is all fruit — on theme with "Agent Fruitstand" — and curated to be:
  *  - value-neutral, with no ordering/quality connotation (unlike A/B/C, whose
  *    "was it B or D?" fades fast, or Alpha/Beta, which read as a ranking);
  *  - free of colour words, so a call-sign never contradicts the per-session
  *    identity COLOUR feature (a "Cherry" tab tinted blue would read as a clash).
- * Swap this single list to change the whole scheme.
+ *    This is why the obvious colour-fruits — Cherry, Orange, Lime, Lemon, Plum,
+ *    Peach, Apricot — are all deliberately absent.
+ * A few entries are recognisable-but-exotic (Loquat, Tangelo); harmless, since a
+ * study session never opens enough tabs to reach the tail of the list.
+ *
+ * This pool and {@link SUBAGENT_CALLSIGNS} are kept DISJOINT so a session and
+ * one of its subagents never read as the same fruit — see the disjointness test.
+ * Swap these two lists to change the whole scheme.
  */
 export const CALLSIGNS = [
   'Apple', 'Mango', 'Melon', 'Kiwi', 'Papaya', 'Pear',
-  'Peanut', 'Cashew', 'Walnut', 'Almond', 'Pecan', 'Sesame',
-  'Waffle', 'Muffin', 'Bagel', 'Pretzel', 'Noodle', 'Pickle',
-  'Biscuit', 'Popcorn', 'Cookie', 'Donut', 'Cracker', 'Pancake',
+  'Banana', 'Grape', 'Pineapple', 'Nectarine', 'Pomegranate', 'Cantaloupe',
+  'Honeydew', 'Mandarin', 'Clementine', 'Satsuma', 'Tangelo', 'Plantain',
+  'Starfruit', 'Dragonfruit', 'Jackfruit', 'Passionfruit', 'Quince', 'Loquat',
+  'Date',
 ] as const
+
+/**
+ * Value-neutral call-signs for SUBAGENTS — the same non-prescriptive idea as
+ * {@link CALLSIGNS}, but a distinct fruit pool so a session and one of its
+ * subagents never read as the same word (a "Mango" session with a "Mango"
+ * subagent). Colour-free for the same reason, since subagents also carry an
+ * identity colour. The subagent's real type + task travels alongside (folded
+ * into the node label as "Guava · Explore", and shown in full on hover).
+ */
+export const SUBAGENT_CALLSIGNS = [
+  'Guava', 'Lychee', 'Fig', 'Coconut', 'Persimmon', 'Kumquat',
+  'Durian', 'Rambutan', 'Longan', 'Mangosteen', 'Soursop', 'Cherimoya',
+  'Tamarind', 'Feijoa', 'Sapodilla', 'Breadfruit', 'Ackee', 'Yuzu',
+  'Calamansi', 'Pawpaw', 'Pomelo', 'Salak', 'Jujube', 'Medlar',
+  'Sapote',
+] as const
+
+/**
+ * Map a 0-based per-session subagent index to a stable, distinct call-sign.
+ * Wraps with a numeric suffix past the pool size ("Guava 2") so names stay
+ * distinct with no hard cap. Purely positional — the caller supplies the index
+ * (subagent spawn order within its session), which keeps it deterministic
+ * across replays.
+ */
+export function subagentCallSign(index: number): string {
+  const n = SUBAGENT_CALLSIGNS.length
+  const word = SUBAGENT_CALLSIGNS[index % n]
+  const wrap = Math.floor(index / n)
+  return wrap === 0 ? word : `${word} ${wrap + 1}`
+}
 
 /**
  * Assign a stable, collision-free call-sign to every currently-open session.

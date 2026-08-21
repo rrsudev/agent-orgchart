@@ -3,6 +3,7 @@
 import { useState, useCallback, useMemo, useEffect, useLayoutEffect, useRef } from "react"
 import { useAgentSimulation } from "@/hooks/use-agent-simulation"
 import { useVSCodeBridge } from "@/hooks/use-vscode-bridge"
+import { vscodeBridge } from "@/lib/vscode-bridge"
 import { useSelectionState } from "@/hooks/use-selection-state"
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts"
 import { useAgentColors, agentColorKey, AGENT_KEY_SEP } from "@/hooks/use-agent-colors"
@@ -29,6 +30,7 @@ import { LayoutProvider, useLayout } from "@/lib/layout"
 
 import { MessageFeedPanel } from "./message-feed-panel"
 import { LegendLauncher, LegendPanel } from "./legend-panel"
+import { ExportLauncher } from "./export-launcher"
 import { BottomDock } from "./bottom-dock"
 import { RailGuard } from "./rail-guard"
 import { RailSlot, SideRail } from "./side-rail"
@@ -49,6 +51,21 @@ const NO_EVENTS: SimulationEvent[] = []
 // parallel view). Times are already on the shared study-session clock.
 const REPLAY_SEP = '␞'
 const REPLAY_IDENTITY = ['name', 'parent', 'agent', 'child'] as const
+
+/** Plain-English fallback for the status line when no live activity clause exists
+ *  yet — a short, wrappable phrase so the "<call-sign> is …" line always reads as
+ *  a sentence instead of a raw session slug. */
+function friendlyStatus(state: string): string {
+  switch (state) {
+    case 'thinking': return 'thinking'
+    case 'tool_calling': return 'working'
+    case 'waiting_permission': return 'waiting for approval'
+    case 'complete': return 'done'
+    case 'error': return 'hit a snag'
+    case 'paused': return 'paused'
+    default: return 'getting started' // idle / unknown
+  }
+}
 function toSimReplayEvent(r: RecordedSimEvent): SimulationEvent {
   const payload: Record<string, unknown> = { ...r.payload }
   if (r.sessionId) {
@@ -235,9 +252,9 @@ export function AgentVisualizer() {
     return m
   }, [agents, agentNameStore, bridge.selectedSessionId, sessionDisplay])
 
-  // Goal subtitles for the CANVAS only (main-agent nodes) — the dim second line
-  // under the call-sign. Panels don't use this (they show the name alone).
-  const agentSubtitles = useMemo(() => {
+  // Session goals per MAIN agent — the full goal text, used by the hover tooltip
+  // and the detail-card task fallback. Not shown directly on the canvas.
+  const agentGoals = useMemo(() => {
     const m = new Map<string, string>()
     for (const [id, agent] of agents) {
       if (!agent.isMain) continue
@@ -248,6 +265,22 @@ export function AgentVisualizer() {
     return m
   }, [agents, bridge.selectedSessionId, sessionDisplay])
 
+  // Dim second line under each node on the CANVAS — the "status layer". The node's
+  // name is drawn directly above, so the status starts at "is …" rather than
+  // repeating the call-sign ("Apple" / "is coding…"). Uses the live activity clause
+  // when one exists ("is debugging server-side issues"), otherwise a plain-English
+  // default from the agent's state ("is thinking"). The animated trailing ellipsis
+  // is added at draw time. Never shows the raw session title/slug — that stays on
+  // the hover + detail card. Gated at draw time by the sublabels toggle.
+  const agentSubtitles = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const [id, agent] of agents) {
+      const activity = agent.statusLine || friendlyStatus(agent.state)
+      m.set(id, `is ${activity}`)
+    }
+    return m
+  }, [agents])
+
   // Full goal / task text shown in a cursor-following tooltip on hover — a
   // "read it all" fallback since the node subtitle is only a 2-line preview.
   // Main agents surface their session goal; subagents surface their full task.
@@ -256,8 +289,8 @@ export function AgentVisualizer() {
     if (!id) return null
     const agent = agents.get(id)
     if (!agent) return null
-    return (agent.isMain ? agentSubtitles.get(id) : agent.task) ?? null
-  }, [selection.hoveredAgentId, agents, agentSubtitles])
+    return (agent.isMain ? agentGoals.get(id) : agent.task) ?? null
+  }, [selection.hoveredAgentId, agents, agentGoals])
 
   // Agents with names overlaid — used by the React panels (canvas gets the map).
   const displayAgents = useMemo(() => {
@@ -321,6 +354,27 @@ export function AgentVisualizer() {
     setShowSubtitles(prev => {
       const next = !prev
       try { window.localStorage.setItem('agent-orgchart:show-subtitles', next ? '1' : '0') } catch { /* ignore */ }
+      return next
+    })
+  }, [])
+  // Tell the host whether the status line is visible so it only spends OpenRouter
+  // credits while the toggle is on. Re-sent when the bridge (re)connects.
+  useEffect(() => {
+    vscodeBridge?.setStatusVisible(showSubtitles)
+  }, [showSubtitles, bridge.isVSCode])
+
+  // Full-text vs. bubbles for the conversation feed. Off by default → messages
+  // render as short truncated bubbles; on → the complete message text. Persisted.
+  const [showFullText, setShowFullText] = useState(false)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const v = window.localStorage.getItem('agent-orgchart:show-fulltext')
+    if (v != null) setShowFullText(v === '1')
+  }, [])
+  const toggleFullText = useCallback(() => {
+    setShowFullText(prev => {
+      const next = !prev
+      try { window.localStorage.setItem('agent-orgchart:show-fulltext', next ? '1' : '0') } catch { /* ignore */ }
       return next
     })
   }, [])
@@ -702,6 +756,8 @@ export function AgentVisualizer() {
         showHexGrid={showHexGrid}
         zoomToFitTrigger={zoomToFitTrigger}
         pauseAutoFit={selection.contextMenu !== null}
+        rightPanelOpen={showFileAttention || chatOpen}
+        showFullText={showFullText}
         onAgentClick={selection.handleAgentClick}
         onAgentHover={selection.setHoveredAgentId}
         onAgentDrag={updateAgentPosition}
@@ -747,7 +803,7 @@ export function AgentVisualizer() {
                 agent={{
                   ...selectedAgent,
                   // Show the full task; main agents fall back to the session goal.
-                  task: selectedAgent.task ?? agentSubtitles.get(selectedAgent.id),
+                  task: selectedAgent.task ?? agentGoals.get(selectedAgent.id),
                 }}
                 onRename={(name) => {
                   const key = agentColorKey(bridge.selectedSessionId, selectedAgent.id)
@@ -778,6 +834,7 @@ export function AgentVisualizer() {
             onOpenChange={setChatOpen}
             mode={chatMode}
             onModeChange={setChatMode}
+            fullText={showFullText}
           />
         </RailSlot>
       </SideRail>
@@ -847,7 +904,16 @@ export function AgentVisualizer() {
           they never coexist, and the dock reports its height so every side
           panel's bottom rail follows it. */}
       <BottomDock
-        left={<LegendLauncher active={showLegend} onOpen={() => setShowLegend(true)} />}
+        left={
+          <div className="flex items-center" style={{ gap: 8 }}>
+            <LegendLauncher active={showLegend} onOpen={() => setShowLegend(true)} />
+            <ExportLauncher
+              isVSCode={bridge.isVSCode}
+              onExport={bridge.isVSCode ? (() => vscodeBridge?.packageStudyData()) : undefined}
+              onRevealFolder={bridge.isVSCode ? (() => vscodeBridge?.revealStudyData()) : undefined}
+            />
+          </div>
+        }
         center={replaying ? (
           <ControlBar
             isPlaying={isPlaying}
@@ -899,12 +965,14 @@ export function AgentVisualizer() {
         connectionStatus={bridge.connectionStatus}
         agentCount={agents.size}
         showFileAttention={showFileAttention}
-        showChat={chatOpen}
-        showTokens={showTokens}
+        showFullText={showFullText}
+        showSubtitles={showSubtitles}
         onToggleFiles={toggleFiles}
-        onToggleChat={toggleChat}
-        onToggleTokens={toggleTokens}
+        onToggleFullText={toggleFullText}
+        onToggleSubtitles={toggleSubtitles}
         onReturnToStudy={study.openStudyWebsite}
+        onRevealStudyData={bridge.isVSCode ? (() => vscodeBridge?.revealStudyData()) : undefined}
+        onExportStudyData={bridge.isVSCode ? (() => vscodeBridge?.packageStudyData()) : undefined}
       />
 
       {/* Replay banner while reviewing a recorded past session */}
