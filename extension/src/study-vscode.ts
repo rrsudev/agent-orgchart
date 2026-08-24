@@ -134,7 +134,16 @@ export async function packageStudyData(storage: StudyStorage | null): Promise<vo
       // strip any pre-existing (now-stale) index so the zip never ships
       // misleading derived data next to the fresh raw capture.
       if (isSqliteAvailable()) {
-        try { buildIndex(captureRoot) } catch (err) { log.debug('index rebuild failed:', err) }
+        try {
+          buildIndex(captureRoot)
+        } catch (err) {
+          // A failed rebuild can leave a freshly-created but empty/partial
+          // study.sqlite on disk; strip it (and any other workspace's stale
+          // index under the packaging root) so the zip never ships misleading
+          // derived data. Raw JSONL remains the source of truth.
+          log.debug('index rebuild failed; stripping stale index:', err)
+          removeStaleIndexes(packageRoot)
+        }
       } else {
         removeStaleIndexes(packageRoot)
       }
@@ -185,6 +194,12 @@ function removeStaleIndexes(packageRoot: string): void {
 async function zipFolder(srcDir: string, destZip: string): Promise<boolean> {
   const parent = path.dirname(srcDir)
   const base = path.basename(srcDir)
+  // Overwrite any existing archive at this path. Info-ZIP `zip` (Linux) ADDS into
+  // an existing archive instead of replacing it, so re-packaging after a
+  // participant deleted a session for redaction would still ship the deleted
+  // data. Removing the destination first makes every platform produce a clean,
+  // current archive that reflects exactly what's on disk now.
+  try { fs.rmSync(destZip, { force: true }) } catch { /* nothing to remove */ }
   try {
     if (process.platform === 'darwin') {
       await execFileAsync('ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', srcDir, destZip])
@@ -192,9 +207,12 @@ async function zipFolder(srcDir: string, destZip: string): Promise<boolean> {
       // Pass the paths as environment variables rather than interpolating them
       // into the -Command string, so a path containing a quote or other
       // PowerShell metacharacter can't break (or inject into) the command.
+      // -LiteralPath (not -Path): -Path treats the source as a wildcard pattern,
+      // so a capture path containing PowerShell glob metacharacters ([ ] * ?) —
+      // legal in Windows dir names — would match nothing and fail the zip.
       await execFileAsync('powershell.exe', [
         '-NoProfile', '-NonInteractive', '-Command',
-        'Compress-Archive -Path $env:AFS_SRC -DestinationPath $env:AFS_DEST -Force',
+        'Compress-Archive -LiteralPath $env:AFS_SRC -DestinationPath $env:AFS_DEST -Force',
       ], { env: { ...process.env, AFS_SRC: srcDir, AFS_DEST: destZip } })
     } else {
       // Linux and friends: zip the folder relative to its parent so the archive

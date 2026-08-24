@@ -3,6 +3,7 @@ import {
   TOOL_MIN_DISPLAY_S, TOOL_MAX_RUNNING_S,
   DISCOVERY_HOLD_S, DISCOVERY_LERP_SPEED,
   BUBBLE_VISIBLE_S, MOCK_END_BUFFER_S,
+  COMPLETE_DIM_OPACITY,
   ANIM_SPEED,
 } from '@/lib/canvas-constants'
 
@@ -24,8 +25,21 @@ function animateAgents(agents: SimulationState['agents'], deltaTime: number, cur
     if (agent.state !== 'complete' && opacity < 1) { opacity = Math.min(1, opacity + deltaTime * ANIM_SPEED.agentFadeIn); updated = true }
     if (agent.state !== 'complete' && scale < 1) { scale = Math.min(1, scale + deltaTime * ANIM_SPEED.agentScaleIn); updated = true }
     if (agent.state === 'complete' && !agent.isMain) {
-      if (opacity > 0) { opacity = Math.max(0, opacity - deltaTime * ANIM_SPEED.agentFadeOut); updated = true }
-      if (scale > 0.8) { scale = Math.max(0.8, scale - deltaTime * ANIM_SPEED.agentScaleOut); updated = true }
+      // A finished subagent SETTLES to a dimmed resting opacity — it does NOT
+      // fade out and get culled. Otherwise every child vanishes seconds after it
+      // returns and the org chart loses its structure (most visible in a single-
+      // session tab, where there's no other session's activity to mask it).
+      // Ease toward the target from EITHER side so a subagent that spawned and
+      // completed in the same frame (still at ~0 opacity, its fade-in skipped)
+      // still becomes visible instead of being deleted at opacity 0.
+      if (opacity < COMPLETE_DIM_OPACITY) {
+        opacity = Math.min(COMPLETE_DIM_OPACITY, opacity + deltaTime * ANIM_SPEED.agentFadeIn); updated = true
+      } else if (opacity > COMPLETE_DIM_OPACITY) {
+        opacity = Math.max(COMPLETE_DIM_OPACITY, opacity - deltaTime * ANIM_SPEED.agentFadeOut); updated = true
+      }
+      // Keep full size (matches completed main agents and the seek/cold-load
+      // snap); the dashed border + check badge + dim opacity carry "done".
+      if (scale < 1) { scale = Math.min(1, scale + deltaTime * ANIM_SPEED.agentScaleIn); updated = true }
     }
     if (agent.state !== 'complete') { timeAlive += deltaTime; updated = true }
     // Prune expired message bubbles
@@ -84,23 +98,13 @@ function cleanupFaded(
   originalAgents: SimulationState['agents'],
   originalToolCalls: SimulationState['toolCalls'],
 ): { agents: SimulationState['agents']; toolCalls: SimulationState['toolCalls']; edges: SimulationState['edges'] } {
-  let newAgents = agents
+  const newAgents = agents
   let newToolCalls = toolCalls
   let filteredEdges = edges
 
-  // Cleanup faded agents (completed sub-agents) and their edges
-  const fadedAgentIds: string[] = []
-  for (const [id, agent] of newAgents) {
-    if (!agent.isMain && agent.state === 'complete' && agent.opacity <= 0) {
-      fadedAgentIds.push(id)
-    }
-  }
-  if (fadedAgentIds.length > 0) {
-    if (newAgents === originalAgents) newAgents = new Map(originalAgents)
-    const fadedSet = new Set(fadedAgentIds)
-    for (const id of fadedAgentIds) newAgents.delete(id)
-    filteredEdges = filteredEdges.filter(e => !fadedSet.has(e.from) && !fadedSet.has(e.to))
-  }
+  // Completed subagents are intentionally NOT culled here — they settle to a
+  // dimmed resting opacity (see animateAgents) so the org chart keeps every
+  // branch after a child returns. Only faded tool calls are cleaned up below.
 
   // Cleanup faded tool calls (opacity <= 0) and their edges
   const fadedToolIds: string[] = []

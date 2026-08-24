@@ -2,7 +2,7 @@
   "name": "agent-flow-study",
   "displayName": "Agent Fruitstand",
   "description": "Beta — a lightweight local companion that lays out your Claude Code agents as they branch, work, and hand off, right inside the editor.",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "preview": true,
   "publisher": "agentflow-study",
   "license": "Apache-2.0",
@@ -112,8 +112,8 @@
         },
         "agentFlowStudy.statusSummaries.enabled": {
           "type": "boolean",
-          "default": false,
-          "description": "Generate live, human-readable status lines under each agent ('guava is debugging server-side auth errors'). When on and an API key is set, a small model summarizes recent activity; otherwise a deterministic fallback derived from tool activity is used. NOTE: with a key set, metadata about agent activity (tool names, truncated argument summaries, file basenames, todo steps) is sent to OpenRouter — disclose this at study enrollment."
+          "default": true,
+          "description": "Generate live, human-readable status lines under each agent ('guava is debugging server-side auth errors'). On by default. A small model summarizes recent activity via OpenRouter, so agent-activity content (the session task/goal, tool names, truncated argument summaries incl. command text, file paths, todo steps) is sent to OpenRouter; informed consent covering this egress is collected at study enrollment. If no key is available (this setting, OPENROUTER_API_KEY, or the build's baked key) it falls back to an on-device deterministic summary with no egress. Set to false to disable."
         },
         "agentFlowStudy.statusSummaries.apiKey": {
           "type": "string",

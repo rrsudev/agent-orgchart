@@ -24,8 +24,8 @@
  * Swap these two lists to change the whole scheme.
  */
 export const CALLSIGNS = [
-  'Apple', 'Mango', 'Melon', 'Kiwi', 'Papaya', 'Pear',
-  'Banana', 'Grape', 'Pineapple', 'Nectarine', 'Pomegranate', 'Cantaloupe',
+  'Mango', 'Kiwi', 'Papaya', 'Pear', 'Melon', 'Banana', 
+  'Apple', 'Grape', 'Pineapple', 'Nectarine', 'Pomegranate', 'Cantaloupe',
   'Honeydew', 'Mandarin', 'Clementine', 'Satsuma', 'Tangelo', 'Plantain',
   'Starfruit', 'Dragonfruit', 'Jackfruit', 'Passionfruit', 'Quince', 'Loquat',
   'Date',

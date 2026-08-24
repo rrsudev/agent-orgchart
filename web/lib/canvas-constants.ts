@@ -33,6 +33,14 @@ export const FALLBACK_CONTEXT_SIZE = 1_000_000
 /** Minimum opacity for an element to be considered visible (used for edge/draw culling) */
 export const MIN_VISIBLE_OPACITY = 0.05
 
+/** Resting opacity for a COMPLETED agent — dimmed but still clearly visible, so a
+ *  finished node reads as "done" without vanishing. Applied to main agents AND
+ *  subagents: a subagent's branch must persist after it returns, or the org chart
+ *  loses its structure the moment a child finishes (in a single-session tab you'd
+ *  watch every subagent fade out seconds after spawning). 0.5 matches the value
+ *  the seek/cold-load snap already used for completed main agents. */
+export const COMPLETE_DIM_OPACITY = 0.5
+
 // ─── Agent spawn distance ───────────────────────────────────────────────────
 
 export const AGENT_SPAWN_DISTANCE = 250

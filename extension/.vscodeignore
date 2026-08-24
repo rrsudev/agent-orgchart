@@ -9,3 +9,7 @@ tsconfig.json
 .next/**
 dist/**/*.map
 dist/*.map
+.openrouter-key
+*.openrouter-key
+.env
+.env.*

@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.7.0
+
+- **Data collection is fully local, and richer.** The extension captures your Claude Code hooks, prompts/transcripts, usage metrics, and interactions to the local capture home only — nothing is uploaded anywhere. Share it with the researchers whenever you like via the panel's **Study data → Package (zip)** button.
+- **Live status lines are on by default and stay on-device.** Each agent shows a short "[verb-ing] [what]" status derived from its recent activity, computed locally with no network calls. (A model-generated variant only runs if you explicitly configure an OpenRouter key; this build ships without one.)
+- **Auto-fit now frames the graph clear of both side rails.** The keep-out insets were wired to the wrong sides, so opening the file/legend panel or selecting an agent would auto-frame the graph *under* the panel that just opened. Selecting a node or opening any panel now reserves the correct column, and the Legend reserves space too.
+- **Completed sub-agents stay on the map.** A finished sub-agent now settles to a dimmed, full-size node (dashed border + state badge) instead of fading out and being removed, so the org chart keeps every branch after a child returns — including when you switch into a session tab or scrub the timeline. Sub-agent call-sign numbering is now stable across live viewing and replay.
+- **More reliable study-data export.**
+  - Re-packaging to an existing zip now overwrites it cleanly. Previously on Linux the archiver *added into* the existing file, so a session you deleted for redaction could still ship in a re-made zip.
+  - Windows zipping now handles capture paths containing `[` `]` and other glob characters.
+  - If the derived SQLite index can't be rebuilt on the host, the stale/partial index is stripped from the zip so it never ships misleading data (the raw JSONL remains the source of truth).
+
 ## 1.6.0
 
 - **Locate and export your study data from the panel.** A new **Study data** menu in the top bar (folds into the overflow menu on narrow widths) reveals the local capture folder or packages it into a zip to send to the researchers — the same actions as the command palette, now one click away.

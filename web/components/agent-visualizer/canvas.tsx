@@ -50,8 +50,11 @@ interface CanvasProps {
   showHexGrid: boolean
   zoomToFitTrigger?: number
   pauseAutoFit?: boolean
-  /** Whether a right-rail panel (chat feed / file-attention) is open, so auto-fit
-   *  can frame the graph clear of it. Left rail is inferred from selectedAgentId. */
+  /** Whether the left rail (file-attention / legend) is open, so auto-fit can
+   *  reserve its column and frame the graph clear of it. */
+  leftPanelOpen?: boolean
+  /** Whether the right rail (selected-agent detail card / message feed) is open,
+   *  so auto-fit can frame the graph clear of it. */
   rightPanelOpen?: boolean
   /** Full-text mode: show the world-space message pop-ups (prompt/thinking/reply
    *  bubbles) on the canvas. Off (default) keeps the canvas quiet — the status line
@@ -80,7 +83,7 @@ interface CanvasProps {
 export function AgentCanvas({
   simulationRef,
   viewKey,
-  selectedAgentId, hoveredAgentId, showStats, showTokens, showSubtitles, showHexGrid, zoomToFitTrigger, pauseAutoFit, rightPanelOpen, showFullText,
+  selectedAgentId, hoveredAgentId, showStats, showTokens, showSubtitles, showHexGrid, zoomToFitTrigger, pauseAutoFit, leftPanelOpen, rightPanelOpen, showFullText,
   onAgentClick, onAgentHover, onAgentDrag, onContextMenu, onToolCallClick, selectedToolCallId, onDiscoveryClick, selectedDiscoveryId,
   agentColors, agentNames, agentSubtitles, onAgentDoubleClick, onAgentNameClick,
 }: CanvasProps) {
@@ -96,8 +99,9 @@ export function AgentCanvas({
   // Screen-space keep-out for auto-fit: the top bar + bottom dock always reserve
   // space, and each open side rail reserves its column, so the graph (and its
   // gray sublabels) is framed clear of the panels instead of drifting under them.
-  // Memoized so the fit-transform cache only busts when the inset actually changes.
-  const leftPanelOpen = selectedAgentId != null
+  // Left/right open-state come from the parent so each inset matches the rail that
+  // is actually rendered on that side. Memoized so the fit-transform cache only
+  // busts when the inset actually changes.
   const viewportInset = useMemo(() => ({
     top: layout.railTop,
     bottom: layout.railBottom,

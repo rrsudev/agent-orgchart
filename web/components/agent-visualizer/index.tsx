@@ -756,7 +756,8 @@ export function AgentVisualizer() {
         showHexGrid={showHexGrid}
         zoomToFitTrigger={zoomToFitTrigger}
         pauseAutoFit={selection.contextMenu !== null}
-        rightPanelOpen={showFileAttention || chatOpen}
+        leftPanelOpen={showFileAttention || showLegend}
+        rightPanelOpen={selection.selectedAgentId != null || chatOpen}
         showFullText={showFullText}
         onAgentClick={selection.handleAgentClick}
         onAgentHover={selection.setHoveredAgentId}

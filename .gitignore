@@ -30,3 +30,7 @@ extension/package-lock.json
 
 # Agent Fruitstand study capture (local research data — do not commit)
 study-storage/
+
+# Baked OpenRouter key for the study VSIX (secret — never commit)
+extension/.openrouter-key
+.openrouter-key
